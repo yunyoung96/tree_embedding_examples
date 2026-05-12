@@ -390,11 +390,20 @@ def collect_labels(parsed_tree):
     return labels
 
 @log_function_call
-def get_trees(limit=-1, flag=False, include_names=False, use_filtering_dfs=True) -> list[any]:
-    print("📋 EXTRACTING STRINGS FROM ast_basic2.json")
+def get_trees(
+    limit=-1,
+    flag=False,
+    include_names=False,
+    use_filtering_dfs=True,
+    json_path=None,
+) -> list[any]:
+    if json_path is None:
+        json_path = os.path.join(ANALYSIS_DIR, 'ast_basic2.json')
+
+    print(f"📋 EXTRACTING STRINGS FROM {json_path}")
     print("=" * 50)
     
-    eval_results = extract_and_eval(limit=limit, flag=flag)
+    eval_results = extract_and_eval(json_path=json_path, limit=limit, flag=flag)
     successful_results = [r for r in eval_results if r['status'] == 'success']
 
     cnts = []
@@ -557,7 +566,7 @@ def pretty_print_tree(node, indent=0):
         print("  " * indent + f"└─ {node}")
 
 @log_function_call
-def main():
+def main(json_path=None):
     limit = 20
     use_filtering_dfs = True
     trees = get_trees(
@@ -565,6 +574,7 @@ def main():
         flag=False,
         include_names=True,
         use_filtering_dfs=use_filtering_dfs,
+        json_path=json_path,
     )
     for idx, (proof_name, tactic, tree) in enumerate(trees):
         tree_output = io.StringIO()
@@ -591,4 +601,5 @@ if __name__=="__main__":
     logging.getLogger().setLevel(log_level)
     logger.info(f"Logging level set to: {logging.getLevelName(log_level)}")
     
-    main()
+    json_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ANALYSIS_DIR, 'ast_basic2.json')
+    main(json_path=json_path)
