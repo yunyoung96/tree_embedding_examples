@@ -385,8 +385,6 @@ class Parser:
         def run_sertop_with_script(script):
             # Setup environment with opam bin directory
             env = os.environ.copy()
-            opam_bin = os.path.expanduser("~/.opam/compcert_local/bin")
-            env["PATH"] = f"{opam_bin}:{env.get('PATH', '')}"
             
             process = subprocess.Popen(
                 cmd,
@@ -663,7 +661,7 @@ class Parser:
 
 def simple():
     print("(simple) Running SERTOP commands for a single file and printing results")
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parent
 
     paths = [
         #(repo_root / "library" / "basic.v", repo_root / "library"),
