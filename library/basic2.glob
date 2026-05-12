@@ -1,0 +1,248 @@
+DIGEST a1e4ad051cbed566cb07a553cb3c772e
+Fbasic2
+R24:26 Coq.Init.Nat <> <> lib
+R53:79 Coq.Numbers.Cyclic.Int63.Uint63 <> <> lib
+R106:121 Coq.Floats.PrimFloat <> <> lib
+R148:159 Coq.Array.PArray <> <> lib
+ax 179:182 <> vnat
+R186:188 Coq.Init.Datatypes <> nat ind
+sec 200:208 <> VarSample
+var 222:232 VarSample visible_var
+R236:238 Coq.Init.Datatypes <> nat ind
+prf 250:259 <> var_sample
+R274:276 Coq.Init.Logic <> ::type_scope:x_'='_x not
+R263:273 basic2 <> VarSample.visible_var var
+R277:287 basic2 <> VarSample.visible_var var
+R327:335 basic2 VarSample <> sec
+ind 349:361 <> visible_small
+constr 375:377 <> vca
+constr 381:383 <> vcb
+scheme 349:361 <> visible_small_rect
+scheme 349:361 <> visible_small_ind
+scheme 349:361 <> visible_small_rec
+scheme 349:361 <> visible_small_sind
+ind 397:416 <> visible_Meta_keyword
+constr 430:433 <> Meta
+scheme 397:416 <> visible_Meta_keyword_rect
+scheme 397:416 <> visible_Meta_keyword_ind
+scheme 397:416 <> visible_Meta_keyword_rec
+scheme 397:416 <> visible_Meta_keyword_sind
+ax 453:457 <> QSort
+R461:463 Coq.Init.Datatypes <> nat ind
+ax 482:485 <> Unif
+R489:491 Coq.Init.Datatypes <> nat ind
+ax 510:521 <> RelevanceVar
+R525:527 Coq.Init.Datatypes <> nat ind
+ax 546:549 <> Same
+R553:555 Coq.Init.Datatypes <> nat ind
+ax 574:577 <> Dual
+R581:583 Coq.Init.Datatypes <> nat ind
+ax 602:609 <> RawLevel
+R613:615 Coq.Init.Datatypes <> nat ind
+ax 634:640 <> UGlobal
+R644:646 Coq.Init.Datatypes <> nat ind
+ax 665:671 <> library
+R675:677 Coq.Init.Datatypes <> nat ind
+ax 696:702 <> process
+R706:708 Coq.Init.Datatypes <> nat ind
+ax 727:729 <> uid
+R733:735 Coq.Init.Datatypes <> nat ind
+rec 774:784 <> visible_box
+proj 800:803 <> vfld
+R807:809 Coq.Init.Datatypes <> nat ind
+ind 827:840 <> visible_stream
+constr 854:857 <> vcon
+R864:867 Coq.Init.Logic <> ::type_scope:x_'->'_x not
+R861:863 Coq.Init.Datatypes <> nat ind
+R882:885 Coq.Init.Logic <> ::type_scope:x_'->'_x not
+R868:881 basic2 <> visible_stream:19 ind
+R886:899 basic2 <> visible_stream:19 ind
+prf 909:928 <> rel_var_const_sample
+R948:950 Coq.Init.Datatypes <> nat ind
+binder 941:944 <> reln:21
+R970:972 Coq.Init.Logic <> ::type_scope:x_'='_x not
+R953:959 Coq.Init.Nat <> add def
+R961:964 basic2 <> reln:21 var
+R966:969 basic2 <> vnat defax
+R973:979 Coq.Init.Nat <> add def
+R981:984 basic2 <> reln:21 var
+R986:989 basic2 <> vnat defax
+prf 1019:1038 <> ind_construct_sample
+R1045:1047 Coq.Init.Logic <> ::type_scope:x_'='_x not
+R1042:1044 basic2 <> vca constr
+R1048:1050 basic2 <> vca constr
+prf 1087:1124 <> sort_prod_lambda_letin_cast_app_sample
+R1130:1130 Coq.Init.Logic <> ::type_scope:x_'->'_x not
+R1163:1169 Coq.Init.Logic <> ::type_scope:x_'->'_x not
+binder 1138:1141 <> ptyp:22
+R1155:1158 Coq.Init.Logic <> ::type_scope:x_'->'_x not
+R1151:1154 basic2 <> ptyp:22 var
+R1159:1162 basic2 <> ptyp:22 var
+R1200:1205 Coq.Init.Logic <> ::type_scope:x_'='_x not
+R1239:1239 Coq.Init.Logic <> ::type_scope:x_'='_x not
+R1182:1184 Coq.Init.Datatypes <> nat ind
+binder 1175:1178 <> lamx:23
+R1189:1192 basic2 <> lamx:23 var
+R1227:1229 Coq.Init.Datatypes <> nat ind
+binder 1210:1213 <> letx:24
+R1235:1238 basic2 <> letx:24 var
+prf 1289:1303 <> case_fix_sample
+R1323:1335 basic2 <> visible_small ind
+binder 1316:1319 <> cass:25
+R1342:1342 Coq.Init.Logic <> ::type_scope:x_'='_x not
+R1407:1414 Coq.Init.Logic <> ::type_scope:x_'='_x not
+R1349:1352 basic2 <> cass:25 var
+R1366:1368 basic2 <> vca constr
+R1386:1388 basic2 <> vcb constr
+R1433:1435 Coq.Init.Datatypes <> nat ind
+binder 1426:1429 <> fixn:27
+R1440:1442 Coq.Init.Datatypes <> nat ind
+R1460:1463 basic2 <> fixn:27 var
+R1479:1479 Coq.Init.Datatypes <> O constr
+R1484:1484 Coq.Init.Datatypes <> O constr
+R1495:1495 Coq.Init.Datatypes <> S constr
+R1505:1505 Coq.Init.Datatypes <> S constr
+R1508:1511 basic2 <> fixf:28 var
+R1538:1541 basic2 <> cass:25 var
+R1563:1565 basic2 <> vca constr
+R1591:1593 basic2 <> vcb constr
+prf 1669:1679 <> proj_sample
+R1697:1707 basic2 <> visible_box rec
+binder 1690:1693 <> boxx:31
+R1719:1721 Coq.Init.Logic <> ::type_scope:x_'='_x not
+R1710:1713 basic2 <> vfld proj
+R1715:1718 basic2 <> boxx:31 var
+R1722:1725 basic2 <> vfld proj
+R1727:1730 basic2 <> boxx:31 var
+prf 1760:1771 <> cofix_sample
+R1777:1777 Coq.Init.Logic <> ::type_scope:x_'='_x not
+R1824:1830 Coq.Init.Logic <> ::type_scope:x_'='_x not
+R1877:1877 Coq.Init.Logic <> ::type_scope:x_'='_x not
+R1791:1804 basic2 <> visible_stream coind
+R1809:1812 basic2 <> vcon constr
+R1820:1823 basic2 <> cofx:32 var
+R1844:1857 basic2 <> visible_stream coind
+R1862:1865 basic2 <> vcon constr
+R1873:1876 basic2 <> cofx:33 var
+prf 1914:1923 <> int_sample
+R1935:1937 Coq.Init.Logic <> ::type_scope:x_'='_x not
+prf 1982:1993 <> float_sample
+R2004:2006 Coq.Init.Logic <> ::type_scope:x_'='_x not
+prf 2050:2061 <> array_sample
+R2099:2103 Coq.Init.Logic <> ::type_scope:x_'='_x not
+R2093:2095 Coq.Init.Datatypes <> nat ind
+R2130:2132 Coq.Init.Datatypes <> nat ind
+prf 2172:2194 <> evar_meta_marker_sample
+R2198:2204 Coq.Init.Logic <> ::type_scope:'exists'_x_'..'_x_','_x not
+R2215:2216 Coq.Init.Logic <> ::type_scope:'exists'_x_'..'_x_','_x not
+R2212:2214 Coq.Init.Datatypes <> nat ind
+binder 2205:2208 <> evrn:34
+R2221:2223 Coq.Init.Logic <> ::type_scope:x_'='_x not
+R2217:2220 basic2 <> evrn:34 var
+R2224:2227 basic2 <> evrn:34 var
+prf 2303:2328 <> meta_keyword_marker_sample
+R2336:2338 Coq.Init.Logic <> ::type_scope:x_'='_x not
+R2332:2335 basic2 <> Meta constr
+R2339:2342 basic2 <> Meta constr
+prf 2379:2399 <> sort_set_irrel_sample
+binder 2412:2413 <> sp:35
+R2426:2429 Coq.Init.Logic <> ::type_scope:x_'->'_x not
+R2424:2425 basic2 <> sp:35 var
+R2466:2468 Coq.Init.Datatypes <> nat ind
+R2466:2468 Coq.Init.Datatypes <> nat ind
+modtype 2489:2492 <> MSIG
+ax 2507:2509 MSIG typ
+ax 2531:2533 MSIG val
+R2537:2539 basic2 MSIG typ defax
+R2546:2549 basic2 MSIG <> modtype
+mod 2560:2563 <> DotM
+def 2579:2582 DotM dotv
+R2586:2588 Coq.Init.Datatypes <> nat ind
+R2604:2607 basic2 DotM <> mod
+R2630:2633 basic2 MSIG <> mod
+mod 2618:2621 <> Fmod
+prf 2645:2658 Fmod modpath_sample
+R2683:2686 Coq.Init.Logic <> ::type_scope:x_'/\'_x not
+R2673:2675 Coq.Init.Logic <> ::type_scope:x_'='_x not
+R2666:2672 basic2 Bnd val defax
+R2676:2682 basic2 Bnd val defax
+R2696:2698 Coq.Init.Logic <> ::type_scope:x_'='_x not
+R2687:2695 basic2 DotM dotv def
+R2699:2707 basic2 DotM dotv def
+R2754:2757 basic2 Fmod <> mod
+mod 2768:2771 <> Orig
+def 2787:2790 Orig oval
+R2794:2796 Coq.Init.Datatypes <> nat ind
+R2812:2815 basic2 Orig <> mod
+R2834:2837 basic2 Orig <> modtype
+mod 2826:2829 <> Alia
+prf 2847:2862 <> dual_path_sample
+R2875:2877 Coq.Init.Logic <> ::type_scope:x_'='_x not
+R2866:2874 basic2 <> oval def
+R2878:2886 basic2 <> oval def
+prf 2923:2941 <> qsort_marker_sample
+R2950:2952 Coq.Init.Logic <> ::type_scope:x_'='_x not
+R2945:2949 basic2 <> QSort defax
+R2953:2957 basic2 <> QSort defax
+prf 2992:3009 <> unif_marker_sample
+R3017:3019 Coq.Init.Logic <> ::type_scope:x_'='_x not
+R3013:3016 basic2 <> Unif defax
+R3020:3023 basic2 <> Unif defax
+prf 3058:3084 <> relevance_var_marker_sample
+R3100:3102 Coq.Init.Logic <> ::type_scope:x_'='_x not
+R3088:3099 basic2 <> RelevanceVar defax
+R3103:3114 basic2 <> RelevanceVar defax
+prf 3149:3166 <> same_marker_sample
+R3174:3176 Coq.Init.Logic <> ::type_scope:x_'='_x not
+R3170:3173 basic2 <> Same defax
+R3177:3180 basic2 <> Same defax
+prf 3215:3233 <> dual_marker_sample2
+R3241:3243 Coq.Init.Logic <> ::type_scope:x_'='_x not
+R3237:3240 basic2 <> Dual defax
+R3244:3247 basic2 <> Dual defax
+prf 3282:3303 <> rawlevel_marker_sample
+R3315:3317 Coq.Init.Logic <> ::type_scope:x_'='_x not
+R3307:3314 basic2 <> RawLevel defax
+R3318:3325 basic2 <> RawLevel defax
+prf 3360:3380 <> uglobal_marker_sample
+R3391:3393 Coq.Init.Logic <> ::type_scope:x_'='_x not
+R3384:3390 basic2 <> UGlobal defax
+R3394:3400 basic2 <> UGlobal defax
+prf 3435:3455 <> library_marker_sample
+R3466:3468 Coq.Init.Logic <> ::type_scope:x_'='_x not
+R3459:3465 basic2 <> library defax
+R3469:3475 basic2 <> library defax
+prf 3510:3530 <> process_marker_sample
+R3541:3543 Coq.Init.Logic <> ::type_scope:x_'='_x not
+R3534:3540 basic2 <> process defax
+R3544:3550 basic2 <> process defax
+prf 3585:3601 <> uid_marker_sample
+R3608:3610 Coq.Init.Logic <> ::type_scope:x_'='_x not
+R3605:3607 basic2 <> uid defax
+R3611:3613 basic2 <> uid defax
+ind 3652:3668 <> visible_even_tree
+constr 3682:3688 <> ve_leaf
+constr 3712:3718 <> ve_node
+ind 3765:3780 <> visible_odd_tree
+constr 3794:3800 <> vo_node
+R3692:3708 basic2 <> visible_even_tree:38 ind
+R3738:3741 Coq.Init.Logic <> ::type_scope:x_'->'_x not
+R3722:3737 basic2 <> visible_odd_tree:39 ind
+R3742:3758 basic2 <> visible_even_tree:38 ind
+R3821:3824 Coq.Init.Logic <> ::type_scope:x_'->'_x not
+R3804:3820 basic2 <> visible_even_tree:38 ind
+R3825:3840 basic2 <> visible_odd_tree:39 ind
+scheme 3652:3668 <> visible_even_tree_rect
+scheme 3652:3668 <> visible_even_tree_ind
+scheme 3652:3668 <> visible_even_tree_rec
+scheme 3652:3668 <> visible_even_tree_sind
+scheme 3765:3780 <> visible_odd_tree_rect
+scheme 3765:3780 <> visible_odd_tree_ind
+scheme 3765:3780 <> visible_odd_tree_rec
+scheme 3765:3780 <> visible_odd_tree_sind
+prf 3850:3872 <> mutual_inductive_sample
+R3892:3908 basic2 <> visible_even_tree ind
+binder 3885:3888 <> tree:42
+R3915:3917 Coq.Init.Logic <> ::type_scope:x_'='_x not
+R3911:3914 basic2 <> tree:42 var
+R3918:3921 basic2 <> tree:42 var
