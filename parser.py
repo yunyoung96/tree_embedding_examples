@@ -4,6 +4,9 @@ from pathlib import Path
 from dataclasses import dataclass, field
 import os
 import inspect
+import json
+import re
+from datetime import datetime
 
 from typing import Any
 
@@ -109,6 +112,78 @@ def extract_text_by_span(source: str, span: SrcSpan) -> str:
     parts.extend(lines[line_no] for line_no in range(span.start.line + 1, span.end.line))
     parts.append(lines[span.end.line][:span.end.col])
     return "\n".join(parts)
+
+def sanitize_filename_part(value: str) -> str:
+    value = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip())
+    return value.strip("_") or "unknown"
+
+def proof_name_from_statement(thm_stmt: str) -> str:
+    tokens = thm_stmt.strip().split()
+    if len(tokens) >= 2:
+        return tokens[1].rstrip(":")
+    if tokens:
+        return tokens[0].rstrip(":")
+    return "unknown_proof"
+
+def sexpdata_to_plain(obj):
+    if isinstance(obj, sexpdata.Symbol):
+        return obj.value()
+    if isinstance(obj, list):
+        return [sexpdata_to_plain(item) for item in obj]
+    return obj
+
+def ast_record_to_string(info: AstInfo) -> str:
+    return repr([
+        info.sid,
+        sexpdata_to_plain(info.ast),
+        info.node_count,
+        info.depth,
+        info.tactic,
+    ])
+
+def build_ast_results(
+    proofs: list[ProofWithAst],
+    file_path: str | Path,
+    project_path: str | Path,
+) -> dict[str, dict[str, dict[str, list[str]]]]:
+    parse_target = Parser.extract_parse_target(file_path, project_path)
+    project_name = parse_target.project_path.name if parse_target.project_path else "project"
+    file_name = str(parse_target.relative_file_path or parse_target.file_path.name)
+
+    proof_results: dict[str, list[str]] = {}
+    for proof in proofs:
+        proof_name = proof_name_from_statement(proof.thm_stmt)
+        proof_results[proof_name] = [ast_record_to_string(info) for info in proof.astinfos]
+
+    return {project_name: {file_name: proof_results}}
+
+def save_ast_results(
+    proofs: list[ProofWithAst],
+    file_path: str | Path,
+    project_path: str | Path,
+    results_root: str | Path | None = None,
+) -> Path:
+    parse_target = Parser.extract_parse_target(file_path, project_path)
+    project_name = parse_target.project_path.name if parse_target.project_path else "project"
+    file_name = parse_target.file_path.name
+
+    if results_root is None:
+        results_root = Path(__file__).resolve().parent / "results"
+
+    date_dir = Path(results_root) / datetime.now().strftime("%Y-%m-%d")
+    date_dir.mkdir(parents=True, exist_ok=True)
+
+    output_name = (
+        f"ast_{sanitize_filename_part(project_name)}_"
+        f"{sanitize_filename_part(file_name)}.json"
+    )
+    output_path = date_dir / output_name
+    output_data = build_ast_results(proofs, file_path, project_path)
+    output_path.write_text(
+        json.dumps(output_data, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return output_path
 
 @dataclass
 class AddedSpan:
@@ -659,42 +734,17 @@ class Parser:
 
         return proofs_list
 
-def simple():
+def main(file_path, project_path):
     print("(simple) Running SERTOP commands for a single file and printing results")
-    repo_root = Path(__file__).resolve().parent
-
-    paths = [
-        #(repo_root / "library" / "basic.v", repo_root / "library"),
-        (repo_root / "library" / "basic2.v", repo_root / "library"),
-        #("/app/coq-modeling/CoqStoq/test-repos/compcert/backend/Deadcodeproof.v", "/app/coq-modeling/CoqStoq/test-repos/compcert")
-    ]
-
-    idx = 0
-
-    file_path = paths[idx][0]
-    project_path = paths[idx][1]
     print(f"(simple) Parse target: {Parser.extract_parse_target(file_path, project_path).format_for_display()}")
 
     parser = Parser(print_flag=False)
     proofs = parser.run_sertop_commands(file_path, project_path)
+    output_path = save_ast_results(proofs, file_path, project_path)
+    print(f"(simple) AST results saved to: {output_path}")
     coq_code = Path(file_path).read_text(encoding="utf-8")
 
-    def pt1(proofs):
-        print(">" * 40 + "pt1")
-        print("(simple) len(proofs): ", len(proofs))
-        for i, proof in enumerate(proofs):
-            print("=" * 80)
-            print(f"(simple) Proof {i + 1}: {proof.thm_stmt}")
-            print(f"(simple) Theorem span: {format_src_span(proof.thm_span)}")
-            print(f"(simple) Theorem from span: <{extract_text_by_span(coq_code, proof.thm_span).strip()}>")
-            print(f"(simple) Number of steps: {len(proof.steps)}")
-            for step_idx, info in enumerate(proof.astinfos):
-                print("-" * 80)
-                print(f"\tStep {step_idx} span: {format_src_span(info.span)}")
-                print(f"\tStep {step_idx} stored: <{info.tactic.strip()}>")
-                print(f"\tStep {step_idx} from span: <{extract_text_by_span(coq_code, info.span).strip()}>")
-
-    def pt2(proofs):
+    def print_proofs(proofs):
         print(">" * 40 + "pt2")
         print("\n" + "="*80)
         print("===== Proofs Summary =====")
@@ -714,50 +764,17 @@ def simple():
                 print(f"Step {idx} AST:")
                 pretty_print_ast(info.ast, indent=2)
 
-    pt2(proofs)
-
-def calculate_stats(file_path, project_path, print_Stats = False):
-    print(f"Running SERTOP commands for file: {file_path}")
-    print(f"Parse target: {Parser.extract_parse_target(file_path, project_path).format_for_display()}")
-    
-    # Create parser instance with print_flag=True to see intermediate outputs
-    parser = Parser(print_flag=False)
-
-    proofs = parser.run_sertop_commands(file_path, project_path)
-    coq_code = Path(file_path).read_text(encoding="utf-8")
-    print("\n" + "="*80)
-    print("===== Proofs Summary =====")
-    print("="*80)
-
-    for proof in proofs:
-        print("=" * 80)
-        print(f"theorem/definition: <{proof.thm_stmt.strip()}>")
-        print(f"theorem span: {format_src_span(proof.thm_span)}")
-        print(f"theorem from span: <{extract_text_by_span(coq_code, proof.thm_span).strip()}>")
-        print(f"Number of steps: {len(proof.steps)}")
-        for idx, info in enumerate(proof.astinfos):
-            print("-" * 80)
-            print(f"Step {idx} span: {format_src_span(info.span)}")
-            print(f"Step {idx} stored: <{info.tactic.strip()}>")
-            print(f"Step {idx} from span: <{extract_text_by_span(coq_code, info.span).strip()}>")
-            print(f"Step {idx} AST:")
-            pretty_print_ast(info.ast, indent=2)
-
-    # Node count and depth statistics will require keeping AstInfo objects
-    # For now, keeping basic proof statistics only
-    if print_Stats:
-        print("\n" + "="*80)
-        print("===== Proof Statistics =====")
-        print("="*80)
-        print(f"Total proofs: {len(proofs)}")
-        for idx, proof in enumerate(proofs):
-            print(f"  {idx+1:2d}. {proof.thm_stmt.strip()}: {len(proof.steps)} steps")
-
+    print_proofs(proofs)
 
 if __name__ == "__main__":
-    simple()
-    #file_path = "/home/yunyoung/coq-modeling/CoqStoq/test-repos/buchberger/theories/Buch.v"
-    #project_path = "/home/yunyoung/coq-modeling/CoqStoq/test-repos/buchberger"
-    #file_path = "/home/yunyoung/coq-modeling/CoqStoq/test-repos/compcert/lib/Lattice.v"
-    #project_path = "/home/yunyoung/coq-modeling/CoqStoq/test-repos/compcert/"
-    #calculate_stats(file_path, project_path)
+    repo_root = Path(__file__).resolve().parent
+
+    paths = [
+        (repo_root / "library" / "basic2.v", repo_root / "library"),
+    ]
+
+    idx = 0
+
+    file_path = paths[idx][0]
+    project_path = paths[idx][1]
+    main(file_path=file_path, project_path=project_path)

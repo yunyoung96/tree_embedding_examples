@@ -91,6 +91,84 @@ Proof.
   reflexivity.
 Qed.
 
+Lemma nested_case_fix_sample :
+  forall lft rgt : visible_small,
+    (fix nested_fix (fuel : nat) : nat :=
+       match fuel with
+       | O =>
+           match lft, rgt with
+           | vca, vca => 0%nat
+           | vca, vcb => 1%nat
+           | vcb, vca => 2%nat
+           | vcb, vcb => 3%nat
+           end
+       | S fuel' =>
+           match lft with
+           | vca => nested_fix fuel'
+           | vcb => S (nested_fix fuel')
+           end
+       end) 2%nat =
+    (fix nested_fix (fuel : nat) : nat :=
+       match fuel with
+       | O =>
+           match lft, rgt with
+           | vca, vca => 0%nat
+           | vca, vcb => 1%nat
+           | vcb, vca => 2%nat
+           | vcb, vcb => 3%nat
+           end
+       | S fuel' =>
+           match lft with
+           | vca => nested_fix fuel'
+           | vcb => S (nested_fix fuel')
+           end
+       end) 2%nat.
+Proof.
+  intros [] []; reflexivity.
+Qed.
+
+Lemma nested_case_cofix_sample :
+  forall head : visible_small,
+    (cofix nested_cofix : visible_stream :=
+       match head with
+       | vca =>
+           vcon
+             ((fix count_down (fuel : nat) : nat :=
+                 match fuel with
+                 | O => 0%nat
+                 | S fuel' => S (count_down fuel')
+                 end) 2%nat)
+             nested_cofix
+       | vcb =>
+           vcon
+             (match head with
+              | vca => 1%nat
+              | vcb => 2%nat
+              end)
+             nested_cofix
+       end) =
+    (cofix nested_cofix : visible_stream :=
+       match head with
+       | vca =>
+           vcon
+             ((fix count_down (fuel : nat) : nat :=
+                 match fuel with
+                 | O => 0%nat
+                 | S fuel' => S (count_down fuel')
+                 end) 2%nat)
+             nested_cofix
+       | vcb =>
+           vcon
+             (match head with
+              | vca => 1%nat
+              | vcb => 2%nat
+              end)
+             nested_cofix
+       end).
+Proof.
+  intros []; reflexivity.
+Qed.
+
 Lemma int_sample : 1%uint63 = 1%uint63.
 Proof.
   reflexivity.
@@ -113,6 +191,52 @@ Proof.
   eexists.
   instantiate (1 := 0%nat).
   reflexivity.
+Qed.
+
+Lemma evar_pair_sample :
+  exists left right : nat, left = right /\ right = left.
+Proof.
+  eexists.
+  eexists.
+  split.
+  - instantiate (1 := 0%nat).
+    reflexivity.
+  - reflexivity.
+Qed.
+
+Lemma evar_nested_exists_sample :
+  exists outer : nat, exists inner : nat, Nat.add outer inner = Nat.add inner outer.
+Proof.
+  eexists.
+  eexists.
+  instantiate (1 := 2%nat).
+  instantiate (1 := 1%nat).
+  reflexivity.
+Qed.
+
+Lemma evar_refine_sample :
+  { chosen : nat | chosen = chosen }.
+Proof.
+  refine (exist (fun chosen : nat => chosen = chosen) 3%nat _).
+  reflexivity.
+Qed.
+
+Lemma evar_case_sample :
+  forall choice : visible_small,
+    exists result : nat,
+      result =
+      match choice with
+      | vca => result
+      | vcb => result
+      end.
+Proof.
+  intros [].
+  - eexists.
+    instantiate (1 := 4%nat).
+    reflexivity.
+  - eexists.
+    instantiate (1 := 5%nat).
+    reflexivity.
 Qed.
 
 Lemma meta_keyword_marker_sample : Meta = Meta.
@@ -195,4 +319,33 @@ Lemma mutual_inductive_sample :
   forall tree : visible_even_tree, tree = tree.
 Proof.
   easy.
+Qed.
+
+Lemma mutual_inductive_mixed_sample :
+  forall even : visible_even_tree,
+  forall odd : visible_odd_tree,
+    ve_node odd = ve_node odd /\ vo_node even = vo_node even.
+Proof.
+  intros even odd.
+  split; reflexivity.
+Qed.
+
+Lemma mutual_inductive_case_sample :
+  forall even : visible_even_tree,
+  forall odd : visible_odd_tree,
+    (match even with
+     | ve_leaf => vo_node ve_leaf
+     | ve_node odd' => odd'
+     end) =
+    (match odd with
+     | vo_node even' =>
+         match even' with
+         | ve_leaf => vo_node ve_leaf
+         | ve_node odd' => odd'
+         end
+     end) ->
+    odd = odd.
+Proof.
+  intros even odd _.
+  reflexivity.
 Qed.

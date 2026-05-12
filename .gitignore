@@ -1,6 +1,7 @@
 .venv/
 */__pycache__/
 experiments/branch_results/
+results/
 /*.txt
 
 # Ignore generated files under library, but keep Coq sources and build config.
@@ -9,3 +10,4 @@ library/**
 !library/*.v
 !library/Makefile
 !library/_CoqProject
+__pycache__

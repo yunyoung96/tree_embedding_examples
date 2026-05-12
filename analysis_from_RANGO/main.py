@@ -2,8 +2,10 @@ import sys
 import os
 import json
 import logging
+import io
 from functools import wraps
 from datetime import datetime
+from contextlib import redirect_stdout
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from experiments.tree_utils import random_tree
 from experiments.algorithms import (
@@ -34,6 +36,8 @@ logging.getLogger('matplotlib').setLevel(logging.WARNING)
 
 logger.debug("Logging configured with DEBUG level")
 
+ANALYSIS_DIR = os.path.dirname(os.path.abspath(__file__))
+
 def log_function_call(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
@@ -47,7 +51,7 @@ def log_function_call(func):
 dfs_call_count = 0
 @log_function_call
 def extract_and_eval(
-    json_path='/home/yunyoung/tree_embedding_examples/analysis_from_RANGO/ast_basic2.json',
+    json_path=os.path.join(ANALYSIS_DIR, 'ast_basic2.json'),
     limit=10,
     flag=False,
 ):
@@ -136,8 +140,10 @@ def extract_and_eval(
     
     return eval_results
 
-@log_function_call
-def dfs1(ast) -> tuple:
+def dfs_with_filtering(ast, var_ids=None) -> tuple:
+    if var_ids is None:
+        var_ids = {}
+
     global dfs_call_count
     dfs_call_count += 1
     
@@ -147,10 +153,56 @@ def dfs1(ast) -> tuple:
         
         ret = ["", []]
         st_idx = 0
+
+
+        def default_elimination(tag, new_st_idx):
+            nonlocal st_idx
+            ret[0] = str(tag)
+            st_idx = new_st_idx
+
+        def ind_ref_label(ind_ref):
+            assert isinstance(ind_ref, list) and len(ind_ref) == 2
+            mutind, ind_idx = ind_ref
+            assert isinstance(mutind, list) and len(mutind) >= 2
+            assert mutind[0] == 'MutInd'
+            kername = mutind[1]
+            assert isinstance(kername, list) and len(kername) == 3
+            assert kername[0] == 'KerName'
+            assert isinstance(kername[2], list) and kername[2][0] == 'Id'
+            return f"{kername[2][1]}_{ind_idx}"
+
+        def case_branch_body(branch):
+            assert isinstance(branch, list) and len(branch) >= 2
+            return branch[-1]
+
+        def binder_label(binder):
+            assert isinstance(binder, list) and len(binder) >= 1
+            binder_name = binder[0]
+            assert isinstance(binder_name, list) and binder_name[0] == 'binder_name'
+            name = binder_name[1]
+            if isinstance(name, list) and len(name) == 2 and name[0] == 'Name':
+                ident = name[1]
+                if isinstance(ident, list) and len(ident) == 2 and ident[0] == 'Id':
+                    return f"Name_{ident[1]}"
+            return "Name"
+
+        def recursive_defs(defs):
+            assert isinstance(defs, list) and len(defs) == 3
+            binders, types, bodies = defs
+            assert len(binders) == len(types) == len(bodies)
+            return [
+                (
+                    f"Def_{binder_label(binder)}",
+                    [
+                        ("Type", [dfs_with_filtering(typ, var_ids)]),
+                        ("Body", [dfs_with_filtering(body, var_ids)]),
+                    ],
+                )
+                for binder, typ, body in zip(binders, types, bodies)
+            ]
+
         if not isinstance(ast[0], list):
             tag = ast[0]
-
-            logger.debug("tag: %s", tag)
 
             match tag:
                 # just ID
@@ -164,67 +216,133 @@ def dfs1(ast) -> tuple:
 
                 # kernel name
                 case 'KerName':
-                    return ('KerName', [])
+                    assert len(ast) == 3
+                    assert ast[2][0] == 'Id'
+                    Id = ast[2][1]
+                    return (f'KerName_{Id}', [])
 
             match tag:# cconstr 순서를 지키려고 함
-                case 'Rel' if len(ast) == 2:
+                case 'Rel':
+                    assert len(ast) == 2
                     return (f'Rel_{ast[1]}', [])
                 case 'Var':
-                    pass
+                    assert len(ast) == 2
+                    assert ast[1][0] == 'Id'
+                    var_name = ast[1][1]
+                    if var_name not in var_ids:
+                        var_ids[var_name] = len(var_ids) + 1
+                    return (f'Var_{var_ids[var_name]}', [])
                 case 'Meta':
                     assert len(ast) == 2
                     return (f'Meta_{ast[1]}', [])
                 case 'Evar':
-                    pass
+                    return ('Evar', [])
                 case 'Sort':
                     assert len(ast) == 2
-                    assert isinstance(ast[1], list)
-                    sort_type = ast[1][0]
+                    if isinstance(ast[1], list):
+                        sort_type = ast[1][0]
+                    else:
+                        sort_type = ast[1]
                     assert not isinstance(sort_type, list)
-                    return ('Sort', [(sort_type, [])])
+                    return (f'Sort_{sort_type}', [])
                 case 'Cast':
-                    pass
+                    assert len(ast) == 4
+                    default_elimination(tag=tag,new_st_idx=1)
                 case 'Prod':
-                    pass
+                    assert len(ast) == 4
+                    default_elimination(tag=tag,new_st_idx=2)
                 case 'Lambda':
-                    pass
+                    assert len(ast) == 4
+                    default_elimination(tag=tag,new_st_idx=2)
                 case 'LetIn':
-                    pass
+                    assert len(ast) == 5
+                    default_elimination(tag=tag,new_st_idx=2)
                 case 'App':
-                    pass
+                    assert len(ast) == 3
+                    default_elimination(tag=tag,new_st_idx=1)
                 case 'Const':
-                    pass
+                    assert len(ast) == 2
+                    constant = ast[1][0]
+                    assert isinstance(constant, list)
+                    assert constant[0] == 'Constant'
+                    assert isinstance(constant[1], list)
+                    return ("Const", [dfs_with_filtering(constant[1], var_ids)])
                 case 'Ind':
                     assert len(ast) == 2
-                    pass
+                    default_elimination(tag=tag,new_st_idx=1)
                 case 'Construct':
-                    pass
+                    assert len(ast) == 2
+                    construct_type = ast[1][0][0]
+                    construct_indx = ast[1][0][1]
+                    assert isinstance(construct_type, list)
+                    return (f"Construct_{construct_indx}", [dfs_with_filtering(construct_type, var_ids)])
                 case 'Case':
-                    pass
+                    assert len(ast) == 8
+                    ci_ind = ast[1][0]
+                    assert ci_ind[0] == 'ci_ind'
+                    case_label = ind_ref_label(ci_ind[1])
+                    predicate = ast[4]
+                    scrutinee = ast[6]
+                    branches = ast[7]
+
+                    return (
+                        f"Case_{case_label}",
+                        [
+                            ("Return", [dfs_with_filtering(predicate, var_ids)]),
+                            ("Scrutinee", [dfs_with_filtering(scrutinee, var_ids)]),
+                            (
+                                "Branches",
+                                [
+                                    dfs_with_filtering(case_branch_body(branch), var_ids)
+                                    for branch in branches
+                                ],
+                            ),
+                        ],
+                    )
                 case 'Fix':
-                    pass
+                    assert len(ast) == 2
+                    return ("Fix", recursive_defs(ast[1][1]))
                 case 'CoFix':
-                    pass
+                    assert len(ast) == 2
+                    return ("CoFix", recursive_defs(ast[1][1]))
                 case 'Proj':
-                    pass
+                    assert len(ast) == 3
+
+                    proj_ind = ast[1][0][0]
+                    assert proj_ind[0] == 'proj_ind'
+                    proj_arg = ast[1][0][3]
+                    assert proj_arg[0] == 'proj_arg'
+                    proj_name = ast[1][0][4]
+                    assert proj_name[0] == 'proj_name'
+                    assert isinstance(proj_name[1], list)
+                    assert proj_name[1][0] == 'Id'
+                    proj_label = proj_name[1][1]
+
+                    return (
+                        f"Proj_{proj_label}",
+                        [
+                            dfs_with_filtering(proj_ind[1], var_ids),
+                            dfs_with_filtering(proj_arg[1], var_ids),
+                        ],
+                    )
                 case 'Int':
-                    pass
+                    return ("Int", [])
                 case 'Float':
-                    pass
+                    return ("Float", [])
                 case 'Array':
-                    pass
+                    default_elimination(tag=tag,new_st_idx=2)
+                    assert len(ast) == 5
+                case _:
+                    default_elimination(tag=tag, new_st_idx=1)
 
             if isinstance(tag, int):
                 ret[0] = '_'
-            else:
-                ret[0] = str(tag)
-            st_idx = 1
 
         for idx in range(st_idx, len(ast)):
             #print("ast: ", ast)
             #print("ast[idx]: ", ast[idx])
             assert isinstance(ast[idx], list) or isinstance(ast[idx], str) or isinstance(ast[idx], int)
-            ret[1].append(dfs1(ast[idx]))
+            ret[1].append(dfs_with_filtering(ast[idx], var_ids))
             
         return tuple(ret)
     else:
@@ -233,6 +351,26 @@ def dfs1(ast) -> tuple:
             return ('_', [])
         else:
             return (str(ast), [])
+
+def dfs_without_filtering(ast) -> tuple:
+    if isinstance(ast, list):
+        if len(ast) == 0:
+            return ("", [])
+        
+        ret = ["", []]
+        st_idx = 0
+        if not isinstance(ast[0], list):
+            ret[0] = str(ast[0])
+            st_idx = 1
+
+        for idx in range(st_idx, len(ast)):
+            assert isinstance(ast[idx], list) or isinstance(ast[idx], str) or isinstance(ast[idx], int)
+            ret[1].append(dfs_without_filtering(ast[idx]))
+            
+        return tuple(ret)
+    else:
+        assert isinstance(ast, str) or isinstance(ast, int)
+        return (str(ast), [])
 
 @log_function_call
 def collect_labels(parsed_tree):
@@ -252,27 +390,33 @@ def collect_labels(parsed_tree):
     return labels
 
 @log_function_call
-def get_trees(limit=-1, flag=False) -> list[any]:
+def get_trees(limit=-1, flag=False, include_names=False, use_filtering_dfs=True) -> list[any]:
     print("📋 EXTRACTING STRINGS FROM ast_basic2.json")
     print("=" * 50)
     
     eval_results = extract_and_eval(limit=limit, flag=flag)
-    eval_list = [r['evaluated'] for r in eval_results if r['status'] == 'success']
+    successful_results = [r for r in eval_results if r['status'] == 'success']
 
     cnts = []
     all_labels = []
 
     trees = []
+    dfs = dfs_with_filtering if use_filtering_dfs else dfs_without_filtering
+    logger.info("Using DFS parser: %s", dfs.__name__)
 
-    for eval_ele in eval_list:        
+    for result in successful_results:
         global dfs_call_count
         dfs_call_count = 0  # 각 AST마다 리셋
-        
+
+        eval_ele = result['evaluated']
         raw_ast = eval_ele[1]
+        tactic = eval_ele[4]
         
-        parsed_ast = dfs1(raw_ast)
-        trees.append(parsed_ast)
-        #print(f"[📊] DFS 호출 횟수: {dfs_call_count}")
+        parsed_ast = dfs(raw_ast)
+        if include_names:
+            trees.append((result['proof'], tactic, parsed_ast))
+        else:
+            trees.append(parsed_ast)
         cnts.append(dfs_call_count)
 
         if limit < 20 and limit != -1:
@@ -287,16 +431,16 @@ def get_trees(limit=-1, flag=False) -> list[any]:
     
     import numpy as np
 
-    print(f"\n[📊] DFS 호출 횟수 - 평균: {np.mean(cnts):.2f}, 총 AST: {len(cnts)}")
+    logger.info("[📊] DFS 호출 횟수 - 평균: %.2f, 총 AST: %d", np.mean(cnts), len(cnts))
     
     # 모든 등장한 label 출력
     unique_labels = sorted(set(all_labels))
-    print(f"\n[🏷️] 모든 등장 Label ({len(unique_labels)}개):")
+    logger.info("[🏷️] 모든 등장 Label (%d개):", len(unique_labels))
     for label in unique_labels:
         count = all_labels.count(label)
-        print(f"  - <{label}>: {count}회")
+        logger.info("  - <%s>: %d회", label, count)
     
-    print(f"\n[📈] 전체 Label 등장 횟수: {len(all_labels)}")
+    logger.info("[📈] 전체 Label 등장 횟수: %d", len(all_labels))
     return trees
 
 @log_function_call
@@ -350,12 +494,11 @@ def main1():
     logger.info("="*70)
     
     # 타임스탐프 기반 출력 디렉토리 생성 (analysis_from_RANGO/branch_results 밑에 저장)
-    analysis_dir = os.path.dirname(os.path.abspath(__file__))
-    branch_results_dir = os.path.join(analysis_dir, "branch_results")
+    branch_results_dir = os.path.join(ANALYSIS_DIR, "branch_results")
     output_dir, timestamp = get_timestamp_dir(branch_results_dir)
     
     # 캐시 파일은 analysis_from_RANGO/ 바로 밑에 저장
-    cache_file = os.path.join(analysis_dir, "edit_distances_q2.json")
+    cache_file = os.path.join(ANALYSIS_DIR, "edit_distances_q2.json")
     
     logger.info(f"Output directory: {output_dir}")
     logger.info(f"Cache file: {cache_file}")
@@ -413,79 +556,32 @@ def pretty_print_tree(node, indent=0):
     else:
         print("  " * indent + f"└─ {node}")
 
-def dfs2(ast) -> tuple:
-    if isinstance(ast, list):
-        if len(ast) == 0:
-            return ("", [])
-        
-        ret = ["", []]
-        st_idx = 0
-        if not isinstance(ast[0], list):
-            ret[0] = str(ast[0])
-            st_idx = 1
-
-        for idx in range(st_idx, len(ast)):
-            #print("ast: ", ast)
-            #print("ast[idx]: ", ast[idx])
-            assert isinstance(ast[idx], list) or isinstance(ast[idx], str) or isinstance(ast[idx], int)
-            ret[1].append(dfs2(ast[idx]))
-            
-        return tuple(ret)
-    else:
-        assert isinstance(ast, str) or isinstance(ast, int)
-        return (str(ast), [])
-
 @log_function_call
-def main2():
-    limit = 10
-    eval_results = extract_and_eval(limit=limit, flag=False)
-    eval_list = [r['evaluated'] for r in eval_results if r['status'] == 'success']
-    for idx, eval_elem in enumerate(eval_list):
-        print(f"\n{'='*60}")
-        print(f"[{idx}] Parsed Tree Structure")
-        print(f"{'='*60}")
-
-        raw_ast = eval_elem[1]
-        parsed_ast = dfs2(raw_ast)
-        pretty_print_tree(parsed_ast)
-
-def pretty_print_sexpr(node, indent=0):
-    """Python list S-expression을 tab 들여쓰기로 예쁘게 출력"""
-    TAB = "\t"
-    prefix = TAB * indent
-
-    if isinstance(node, list):
-        if len(node) == 0:
-            print(prefix + "[]")
-        elif len(node) == 1 and not isinstance(node[0], list):
-            print(prefix + f"[{node[0]},]")
-        else:
-            print(prefix + "[")
-            for child in node:
-                pretty_print_sexpr(child, indent + 1)
-            print(prefix + "]")
-    else:
-        print(prefix + str(node) + ",")
-
-
-@log_function_call
-def main3():
+def main():
     limit = 20
-    trees = get_trees(limit=limit, flag=False)
-    for idx, tree in enumerate(trees):
-        print(f"\n{'='*60}")
-        print(f"[{idx}] Parsed Tree from dfs1")
-        print(f"{'='*60}")
-        pretty_print_tree(tree)
+    use_filtering_dfs = True
+    trees = get_trees(
+        limit=limit,
+        flag=False,
+        include_names=True,
+        use_filtering_dfs=use_filtering_dfs,
+    )
+    for idx, (proof_name, tactic, tree) in enumerate(trees):
+        tree_output = io.StringIO()
+        with redirect_stdout(tree_output):
+            pretty_print_tree(tree)
+        logger.debug(
+            "\n%s\n[%d] %s | tactic: %s\n%s\n%s",
+            "="*60,
+            idx,
+            proof_name,
+            tactic,
+            "="*60,
+            tree_output.getvalue().rstrip(),
+        )
 
 
 if __name__=="__main__":
-    # Command line 인자로 logging level 동적 변경
-    # 사용법:
-    #   python main.py                  (기본: DEBUG)
-    #   python main.py --log-level info (INFO 레벨)
-    #   python main.py --log-level debug (DEBUG 레벨)
-    
     import sys
     
     log_level = logging.DEBUG  # 기본값
@@ -495,4 +591,4 @@ if __name__=="__main__":
     logging.getLogger().setLevel(log_level)
     logger.info(f"Logging level set to: {logging.getLevelName(log_level)}")
     
-    main3()
+    main()
