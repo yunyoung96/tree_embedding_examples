@@ -3,6 +3,9 @@
 experiments/branch_results/
 results/
 /*.txt
+*.aux
+*.glob
+*.vo
 
 # Ignore generated files under library, but keep Coq sources and build config.
 library/**
