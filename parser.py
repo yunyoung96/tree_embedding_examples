@@ -67,10 +67,18 @@ class ProofWithAst:
     thm_stmt: str
     steps: list[str]
     thm_span: SrcSpan
-    astinfos: list[AstInfo] = field(default_factory=list)
+    astinfo_for_thm: AstInfo
+    astinfos_for_tactics: list[AstInfo] = field(default_factory=list)
 
     def __post_init__(self):
-        require_not_none(self, "thm_stmt", "steps", "thm_span", "astinfos")
+        require_not_none(
+            self,
+            "thm_stmt",
+            "steps",
+            "thm_span",
+            "astinfo_for_thm",
+            "astinfos_for_tactics",
+        )
 
 @dataclass
 class ParseTarget:
@@ -145,15 +153,21 @@ def build_ast_results(
     proofs: list[ProofWithAst],
     file_path: str | Path,
     project_path: str | Path,
-) -> dict[str, dict[str, dict[str, list[str]]]]:
+) -> dict[str, dict[str, dict[str, dict[str, str | list[str]]]]]:
     parse_target = Parser.extract_parse_target(file_path, project_path)
     project_name = parse_target.project_path.name if parse_target.project_path else "project"
     file_name = str(parse_target.relative_file_path or parse_target.file_path.name)
 
-    proof_results: dict[str, list[str]] = {}
+    proof_results: dict[str, dict[str, str | list[str]]] = {}
     for proof in proofs:
         proof_name = proof_name_from_statement(proof.thm_stmt)
-        proof_results[proof_name] = [ast_record_to_string(info) for info in proof.astinfos]
+        proof_results[proof_name] = {
+            "astinfo_for_thm": ast_record_to_string(proof.astinfo_for_thm),
+            "astinfos_for_tactics": [
+                ast_record_to_string(info)
+                for info in proof.astinfos_for_tactics
+            ],
+        }
 
     return {project_name: {file_name: proof_results}}
 
@@ -438,18 +452,9 @@ class Parser:
 
         coq_code = get_coq_code(file_path, normalize_space=False)
 
-        """
-        lines = []
-        for line in coq_code.splitlines():
-            lines.append(line)
-            if "Ltac FuncInv" in line:
-                break
-        coq_code = "\n".join(lines)
-        """
-
         self._print("======> stage a: Coq Code to be Added =====")
+        
         #self._print("coq_code: ", coq_code)
-
         dumped = sexpdata.dumps(coq_code)
 
         self._print("======> stage a: Dumped Coq Code =====")
@@ -623,7 +628,7 @@ class Parser:
             self._print("-" * 80)
             self._print("len of coqasts_proofs: ", len(coqasts_proofs))
             if len(coqasts_proofs) > 0:
-                self._print("len of tactic: ", len(coqasts_proofs[-1]))
+                self._print("len of tactic astinfos: ", len(coqasts_proofs[-1][2]))
             sid, (ast, node_count, depth) = node
             self._print("sid while clustering proofs: ", sid)
             tactic = span_map.get_snippet_by_sid(sid, self._TACTIC_NOT_FOUND)
@@ -642,8 +647,6 @@ class Parser:
                     "Proof start detected but no theorem/definition statement found. "
                     f"sid={sid}, tactic=<{tactic}>, ast={ast}"
                 )
-                #coqasts_proofs.append(("", [], None))
-                #self._print(f"===> new proof added with None theorem span with tactic {tactic}")
 
             if (tactic.startswith('Definition') and len(ast) != 0)\
                 or (tactic.startswith('Let') and len(ast) != 0)\
@@ -668,7 +671,8 @@ class Parser:
                 inner_proof = True
                 thm_span = span_map.get_span_by_sid(sid)
                 assert thm_span is not None, f"Theorem span not found for sid {sid}"
-                coqasts_proofs.append((tactic, [], thm_span))
+                astinfo_for_thm = AstInfo(sid, ast, node_count, depth, tactic, thm_span)
+                coqasts_proofs.append((tactic, astinfo_for_thm, [], thm_span))
                 self._print("===> new proof added with theorem span: ", format_src_span(thm_span))
                 self._print(f"===> tactic : <{tactic}>")
                 continue
@@ -685,7 +689,7 @@ class Parser:
                 if tactic.startswith('Ltac') or tactic.startswith('Local Ltac'):
                     self._print("[stage] branch: skip-ltac")
                     continue
-                coqasts_proofs[-1][1].append(info)
+                coqasts_proofs[-1][2].append(info)
                 self._print("===> tactic : ", tactic)
             pattern = r"\s*Proof\s*\."
             import re
@@ -702,16 +706,17 @@ class Parser:
         self._print("len of coqasts_proofs after processing: ", len(coqasts_proofs))
         for idx, proof_tuple in enumerate(coqasts_proofs):
             self._print(f"===> proof with tactics: idx: {idx}")
-            thm_stmt, infos, thm_span = proof_tuple
+            thm_stmt, astinfo_for_thm, infos, thm_span = proof_tuple
             self._print(f"\tthm_stmt='{thm_stmt.strip()}'")
             self._print(f"\tthm_span={thm_span}")
+            self._print(f"\tthm_ast_sid={astinfo_for_thm.sid}")
             for info in infos:
                 self._print(f"\ttactic='{info.tactic.strip()}' with sid={info.sid}")
             self._print()
 
         # Convert to Proof objects
         proofs_list = []
-        for idx, (thm_stmt, infos, thm_span) in enumerate(coqasts_proofs):
+        for idx, (thm_stmt, astinfo_for_thm, infos, thm_span) in enumerate(coqasts_proofs):
             self._print(
                 "[run_sertop_commands] coqasts_proofs "
                 f"idx={idx}, thm_span={format_src_span(thm_span)}, "
@@ -728,7 +733,8 @@ class Parser:
                     thm_stmt=thm_stmt,
                     steps=steps,
                     thm_span=thm_span,
-                    astinfos=infos,
+                    astinfo_for_thm=astinfo_for_thm,
+                    astinfos_for_tactics=infos,
                 )
             )
 
@@ -738,7 +744,7 @@ def main(file_path, project_path):
     print("(simple) Running SERTOP commands for a single file and printing results")
     print(f"(simple) Parse target: {Parser.extract_parse_target(file_path, project_path).format_for_display()}")
 
-    parser = Parser(print_flag=False)
+    parser = Parser(print_flag=True)
     proofs = parser.run_sertop_commands(file_path, project_path)
     output_path = save_ast_results(proofs, file_path, project_path)
     print(f"(simple) AST results saved to: {output_path}")
@@ -755,8 +761,10 @@ def main(file_path, project_path):
             print(f"theorem/definition: <{proof.thm_stmt.strip()}>")
             print(f"theorem span: {format_src_span(proof.thm_span)}")
             print(f"theorem from span: <{extract_text_by_span(coq_code, proof.thm_span).strip()}>")
+            print("Theorem AST:")
+            pretty_print_ast(proof.astinfo_for_thm.ast, indent=2)
             print(f"Number of steps: {len(proof.steps)}")
-            for idx, info in enumerate(proof.astinfos):
+            for idx, info in enumerate(proof.astinfos_for_tactics):
                 print("-" * 80)
                 print(f"Step {idx} span: {format_src_span(info.span)}")
                 print(f"Step {idx} stored: <{info.tactic.strip()}>")
@@ -770,7 +778,7 @@ if __name__ == "__main__":
     repo_root = Path(__file__).resolve().parent
 
     paths = [
-        (repo_root / "library" / "basic2.v", repo_root / "library"),
+        (repo_root / "library" / "basic3.v", repo_root / "library"),
     ]
 
     idx = 0

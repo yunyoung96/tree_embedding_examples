@@ -33,6 +33,18 @@ logger.debug("Logging configured with DEBUG level")
 
 ANALYSIS_DIR = os.path.dirname(os.path.abspath(__file__))
 
+def iter_ast_record_strings(proof_records):
+    if isinstance(proof_records, list):
+        return proof_records
+    if isinstance(proof_records, dict):
+        records = []
+        thm_record = proof_records.get("astinfo_for_thm")
+        if thm_record is not None:
+            records.append(thm_record)
+        records.extend(proof_records.get("astinfos_for_tactics", []))
+        return records
+    raise TypeError(f"Unsupported proof record shape: {type(proof_records).__name__}")
+
 def log_function_call(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
@@ -67,13 +79,13 @@ def extract_and_eval(
     )
     keyword_counts = {keyword: 0 for keyword in target_keywords}
     
-    # project_key -> file_name_key -> proof_name_key -> [strings]
+    # project_key -> file_name_key -> proof_name_key -> [strings] or grouped AST records
     for project_key, files in data.items():
         for file_idx, (file_name, proofs) in enumerate(files.items(), start=1):
             logger.info(f"Checking file {file_idx}/{len(files)}: {project_key} / {file_name}")
-            for proof_name, string_list in proofs.items():
+            for proof_name, proof_records in proofs.items():
                 logger.info(f"Checking proof: {project_key} / {file_name} / {proof_name}")
-                for string in string_list:
+                for string in iter_ast_record_strings(proof_records):
                     if flag:
                         if limit != -1 and all(count >= limit for count in keyword_counts.values()):
                             break
