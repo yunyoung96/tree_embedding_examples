@@ -386,7 +386,7 @@ class Parser:
         if self.print_flag:
             print(*args, **kwargs)
     
-    def run_sertop_commands(self, file_path: str | Path, project_path: str | Path):
+    def run_sertop_commands(self, file_path: str | Path, project_path: str | Path) -> list[ProofWithAst]:
         self.current_parse_target = self.extract_parse_target(file_path, project_path)
         self._print(f"[Parser] Current parse target: {self.current_parse_target.format_for_display()}")
 
