@@ -601,24 +601,16 @@ class Parser:
         
         assert len(coqasts) == len(added_state_ids), f"Expected coqasts length to match added_state_ids length, but got {len(coqasts)} coqasts and {len(added_state_ids)} state IDs."
 
-        def erase_details(ast, ids, replace_value=True):
+        def collect_ast_metrics(ast):
             if isinstance(ast, list):
-                if len(ast) > 0 and isinstance(ast[0], sexpdata.Symbol) and ast[0].value() == 'loc':
-                    return ([sexpdata.Symbol('loc')], 1, 1)
-                elif replace_value and \
-                    len(ast) >= 2 and isinstance(ast[0], sexpdata.Symbol) and isinstance(ast[1], sexpdata.Symbol) \
-                    and ast[0].value() == 'Id' and ast[1].value() not in ids:
-                    ids[ast[1].value()] = len(ids) + 1
-                    return ([sexpdata.Symbol('Id'), sexpdata.Symbol(f'id{ids[ast[1].value()]}')], 2, 1)
-                else:
-                    children = [erase_details(item, ids, replace_value=False) for item in ast]
-                    processed_children = [c[0] for c in children]
-                    total_count = 1 + sum(c[1] for c in children)
-                    max_depth = max([c[2] for c in children]) if children else 0
-                    return (processed_children, total_count, max_depth + 1)
+                children = [collect_ast_metrics(item) for item in ast]
+                processed_children = [c[0] for c in children]
+                total_count = 1 + sum(c[1] for c in children)
+                max_depth = max([c[2] for c in children]) if children else 0
+                return (processed_children, total_count, max_depth + 1)
             return (ast, 1, 1)
 
-        coqasts_light = [(sid, erase_details(ast, {}, replace_value = False)) for sid, ast in coqasts]
+        coqasts_light = [(sid, collect_ast_metrics(ast)) for sid, ast in coqasts]
         coqasts_proofs = []
         inner_proof = False
 
@@ -778,7 +770,7 @@ if __name__ == "__main__":
     repo_root = Path(__file__).resolve().parent
 
     paths = [
-        (repo_root / "library" / "basic3.v", repo_root / "library"),
+        (repo_root / "library" / "basic2.v", repo_root / "library"),
     ]
 
     idx = 0
