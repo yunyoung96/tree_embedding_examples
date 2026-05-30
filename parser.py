@@ -7,8 +7,10 @@ import inspect
 import json
 import re
 from datetime import datetime
+from collections import Counter
 
-from typing import Any
+from ast_types import Ast
+import tree_utils
 
 def require_not_none(obj, *field_names: str) -> None:
     for field_name in field_names:
@@ -53,7 +55,7 @@ class SrcSpan:
 @dataclass
 class AstInfo:
     sid: int
-    ast: Any
+    ast: Ast
     node_count: int
     depth: int
     tactic: str
@@ -79,6 +81,9 @@ class ProofWithAst:
             "astinfo_for_thm",
             "astinfos_for_tactics",
         )
+
+    def all_astinfos(self) -> list[AstInfo]:
+        return [self.astinfo_for_thm, *self.astinfos_for_tactics]
 
 @dataclass
 class ParseTarget:
@@ -138,12 +143,15 @@ def sexpdata_to_plain(obj):
         return obj.value()
     if isinstance(obj, list):
         return [sexpdata_to_plain(item) for item in obj]
-    return obj
+    assert isinstance(obj, (int, float, str)), (
+        f"Expected int, float, or str in sexpdata_to_plain, got {type(obj).__name__}: {obj!r}"
+    )
+    return str(obj)
 
 def ast_record_to_string(info: AstInfo) -> str:
     return repr([
         info.sid,
-        sexpdata_to_plain(info.ast),
+        info.ast,
         info.node_count,
         info.depth,
         info.tactic,
@@ -592,13 +600,15 @@ class Parser:
                         self._print(f"[AST vars] goals_ty_len={len(goals_ty)}")
                         assert ty[0].value() == "ty"
 
+                    goals_ty = sexpdata_to_plain(goals_ty)
+
                     coqasts.append((sid, goals_ty))
                     self._print("[AST stage] appended parsed goals_ty")
                     self._print(f"[AST vars] appended sid={sid}, goals_ty={goals_ty}, coqasts_len={len(coqasts)}")
                 else:
                     self._print("[AST stage] unrecognized object shape")
                     self._print(f"[AST vars] sid={sid}, obj_type={type(obj)}, obj={obj}")
-        
+
         assert len(coqasts) == len(added_state_ids), f"Expected coqasts length to match added_state_ids length, but got {len(coqasts)} coqasts and {len(added_state_ids)} state IDs."
 
         def collect_ast_metrics(ast):
@@ -740,9 +750,8 @@ def main(file_path, project_path):
     proofs = parser.run_sertop_commands(file_path, project_path)
     output_path = save_ast_results(proofs, file_path, project_path)
     print(f"(simple) AST results saved to: {output_path}")
-    coq_code = Path(file_path).read_text(encoding="utf-8")
 
-    def print_proofs(proofs):
+    def print_proofs(proofs, coq_code: str):
         print(">" * 40 + "pt2")
         print("\n" + "="*80)
         print("===== Proofs Summary =====")
@@ -764,13 +773,69 @@ def main(file_path, project_path):
                 print(f"Step {idx} AST:")
                 pretty_print_ast(info.ast, indent=2)
 
-    print_proofs(proofs)
+    def print_nearest_astinfos_by_source(proofs, top_k=5, q=2):
+        branch_records = []
+        for proof in proofs:
+            proof_name = proof_name_from_statement(proof.thm_stmt)
+            for astinfo_idx, info in enumerate(proof.all_astinfos()):
+                role = "theorem" if astinfo_idx == 0 else f"tactic[{astinfo_idx - 1}]"
+                tree = tree_utils.dfs_with_filtering(info.ast)
+                branches = tree_utils.extract_q_level_binary_branches(tree, q=q)
+                branch_records.append(
+                    {
+                        "proof_name": proof_name,
+                        "thm_stmt": proof.thm_stmt,
+                        "role": role,
+                        "info": info,
+                        "tree": tree,
+                        "branches": branches,
+                        "vector": Counter(branches),
+                    }
+                )
+
+        print("\n" + "=" * 80)
+        print(f"===== Per-AstInfo Top {top_k} Nearest Neighbors by Branch Distance =====")
+        print("=" * 80)
+
+        for source_idx, source in enumerate(branch_records):
+            source_info = source["info"]
+            neighbors = []
+            for target_idx, target in enumerate(branch_records):
+                if source_idx == target_idx:
+                    continue
+                normalized_dist, raw_dist = tree_utils.compute_branch_distance_from_vectors(
+                    source["vector"],
+                    target["vector"],
+                    q=q,
+                )
+                neighbors.append(
+                    (
+                        normalized_dist,
+                        raw_dist,
+                        target,
+                    )
+                )
+
+            print("-" * 80)
+            print(f"Source theorem: {source['proof_name']}")
+            print(f"Source tactic : <{source_info.tactic.strip()}>")
+            print(f"Source branches: {source['branches']}")
+            neighbors.sort(key=lambda item: (item[0], item[1]))
+            for rank, (_normalized_dist, _raw_dist, target) in enumerate(neighbors[:top_k], start=1):
+                target_info = target["info"]
+                print(f"  top{rank}. theorem: {target['proof_name']}")
+                print(f"     tactic  : <{target_info.tactic.strip()}>")
+                print(f"     branches: {target['branches']}")
+
+    coq_code = Path(file_path).read_text(encoding="utf-8")
+    print_proofs(proofs, coq_code)
+    print_nearest_astinfos_by_source(proofs)
 
 if __name__ == "__main__":
     repo_root = Path(__file__).resolve().parent
 
     paths = [
-        (repo_root / "library" / "basic2.v", repo_root / "library"),
+        (repo_root / "library" / "basic.v", repo_root / "library"),
     ]
 
     idx = 0
