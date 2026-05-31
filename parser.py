@@ -8,9 +8,12 @@ import json
 import re
 from datetime import datetime
 from collections import Counter
+from typing import Any, TypeAlias
 
 from ast_types import Ast
 import tree_utils
+
+AstMetric: TypeAlias = tuple[Ast | str, int, int]
 
 def require_not_none(obj, *field_names: str) -> None:
     for field_name in field_names:
@@ -59,10 +62,11 @@ class AstInfo:
     node_count: int
     depth: int
     tactic: str
+    goal_string: str
     span: SrcSpan
 
     def __post_init__(self):
-        require_not_none(self, "sid", "ast", "node_count", "depth", "tactic", "span")
+        require_not_none(self, "sid", "ast", "node_count", "depth", "tactic", "goal_string", "span")
 
 @dataclass
 class ProofWithAst:
@@ -155,6 +159,7 @@ def ast_record_to_string(info: AstInfo) -> str:
         info.node_count,
         info.depth,
         info.tactic,
+        info.goal_string,
     ])
 
 def build_ast_results(
@@ -407,12 +412,21 @@ class Parser:
         """Print only if print_flag is True"""
         if self.print_flag:
             print(*args, **kwargs)
-    
-    def run_sertop_commands(self, file_path: str | Path, project_path: str | Path) -> list[ProofWithAst]:
-        self.current_parse_target = self.extract_parse_target(file_path, project_path)
-        self._print(f"[Parser] Current parse target: {self.current_parse_target.format_for_display()}")
 
+    @staticmethod
+    def parse_sertop_output(stdout: str, erase_feedback_sertop_output: bool = True) -> list[Any]:
+        parsed_str = "(" + stdout + ")"
+        parsed = sexpdata.loads(parsed_str)
+        ret = []
+        for item in parsed:
+            if item[0].value() == "Feedback" and erase_feedback_sertop_output:
+                continue
+            ret.append(item)
+        return ret
+
+    def run_sertop_with_script(self, file_path: str | Path, project_path: str | Path, script: str) -> str:
         cmd = ["sertop", "--printer=sertop"]
+        # Setup environment with opam bin directory
 
         coq_project_path = Path(project_path) / "_CoqProject"
         if not coq_project_path.exists():
@@ -433,116 +447,139 @@ class Parser:
                 i += 1
 
         self._print("cmd : ", cmd)
+        env = os.environ.copy()
         
-        def get_coq_code(file_path: str | Path, normalize_space=False):
-            self._print(f"Reading Coq code from: {file_path}")
-            basic_v_path = Path(file_path)
-            if normalize_space:
-                import re
-                coq_lines = []
-
-                self._print(f"Reading Coq code from: {basic_v_path}")
-
-                for line in basic_v_path.read_text(encoding="utf-8").splitlines():
-                    line = re.sub(r"\s+", " ", line).strip()
-                    self._print(f"Processing line: {line}")
-                    coq_lines.append(line)
-
-                coq_code = " ".join(coq_lines).strip()
-                coq_code = self.remove_coq_block_comments(coq_code)
-                assert "\n" not in coq_code, "coq_code should be flattened to one line"
-                return coq_code
-            else:
-                coq_code = basic_v_path.read_text(encoding="utf-8")
-                return coq_code
-
-        self._print("======> stage a: Reading and Preprocessing Coq Code =====")
-
-        coq_code = get_coq_code(file_path, normalize_space=False)
-
-        self._print("======> stage a: Coq Code to be Added =====")
-        
-        #self._print("coq_code: ", coq_code)
-        dumped = sexpdata.dumps(coq_code)
-
-        self._print("======> stage a: Dumped Coq Code =====")
-        #self._print("dumped: ", dumped)
-
-        coq_script_thm = f"(Add () {dumped})\n"
-
-        def run_sertop_with_script(script):
-            # Setup environment with opam bin directory
-            env = os.environ.copy()
-            
-            process = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                env=env
-            )
-            return self.go(process, script)
-        
-        def parse_sertop_output(stdout, erase_feedback_sertop_output = True):
-            parsed_str = "(" + stdout + ")"
-            parsed = sexpdata.loads(parsed_str)
-            ret = []
-            for item in parsed:
-                if item[0].value() == "Feedback" and erase_feedback_sertop_output:
-                    continue
-                ret.append(item)
-            return ret
-
-        self._print("======> stage a: Running SERTOP with Add Command =====")
-
-        stdout = run_sertop_with_script(coq_script_thm)
-
-        self._print("======> stage b: SERTOP RAW OUTPUT (after Add) =====")
-
-        parsed_str = "(" + stdout + ")"
-
-        self._print("parsed_str: ", parsed_str)
-
-        parsed = sexpdata.loads(parsed_str)
-
-        self._print("======> stage c: Extracting Added State IDs and Spans =====")
-
-        span_map = AddedSpanMap.get_span(
-            parsed,
-            coq_code,
-            self.print_flag,
+        process = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env
         )
-        added_state_ids = span_map.state_ids
+        return self.go(process, script)
 
-        self._print("\n===== Added Span Mapping (sid -> source span) =====")
-        for row in span_map.spans:
-            self._print(
-                f"sid={row.sid} | start={row.start.line}:{row.start.col} "
-                f"| end={row.end.line}:{row.end.col} "
-                f"| text='{row.snippet}'"
-            )
+    def get_coq_code(self, file_path: str | Path, normalize_space: bool = False) -> str:
+        self._print(f"Reading Coq code from: {file_path}")
+        basic_v_path = Path(file_path)
+        if normalize_space:
+            import re
+            coq_lines = []
 
-        self._print(f"\n===== All Added State IDs: {added_state_ids} =====")
+            self._print(f"Reading Coq code from: {basic_v_path}")
 
-        if not added_state_ids:
-            self._print("Warning: No added state IDs found. Returning empty proofs list.")
-            return []
+            for line in basic_v_path.read_text(encoding="utf-8").splitlines():
+                line = re.sub(r"\s+", " ", line).strip()
+                self._print(f"Processing line: {line}")
+                coq_lines.append(line)
 
+            coq_code = " ".join(coq_lines).strip()
+            coq_code = self.remove_coq_block_comments(coq_code)
+            assert "\n" not in coq_code, "coq_code should be flattened to one line"
+            return coq_code
+        else:
+            coq_code = basic_v_path.read_text(encoding="utf-8")
+            return coq_code
+
+    def get_coq_goals(
+        self,
+        file_path: str | Path,
+        project_path: str | Path,
+        coq_script_thm: str,
+        added_state_ids: list[int],
+        span_map: AddedSpanMap,
+    ) -> list[str]:
+        self._print("(get_coq_goals) get_coq_goals is called")
         coq_script = coq_script_thm + f"(Exec {added_state_ids[-1]})"
+        for sid in added_state_ids:
+            coq_script += f"(Query ((sid {sid}) (pp ((pp_format PpStr)))) Goals)"
 
-        for id in added_state_ids:
-            #self._print(f"Adding query for sid: {id}")
-            coq_script += f"(Query ((sid {id}) (pp ((pp_format PpSer)))) Goals)"
+        stdout = self.run_sertop_with_script(
+            file_path=file_path,
+            project_path=project_path,
+            script=coq_script,
+        )
 
-        stdout = run_sertop_with_script(coq_script)
-
-        self._print("===== SERTOP RAW OUTPUT =====")
-
-        coqasts = []
-        for idx, item in enumerate(parse_sertop_output(stdout, erase_feedback_sertop_output = True)):
+        coq_goal_strings: list[str] = []
+        for idx, item in enumerate(self.parse_sertop_output(stdout, erase_feedback_sertop_output=True)):
             self._print("-" * 80)
-            self._print("item: ", item)
+            self._print("(get_coq_goals) item: ", item)
+            if not (isinstance(item, list) and len(item) >= 3):
+                continue
+            answer_content = item[2]
+            if not (isinstance(answer_content, list) and len(answer_content) >= 2):
+                continue
+            if not hasattr(answer_content[0], "value") or answer_content[0].value() != "ObjList":
+                continue
+            obj_list = answer_content[1]
+            if not isinstance(obj_list, list):
+                continue
+
+            self._print("[Goal stage] ObjList item accepted")
+            self._print(f"[Goal vars] item_idx={idx}, item_answer_id={item[1]}, obj_list_len={len(obj_list)}")
+            self._print(f"[Goal vars] obj_list={obj_list}")
+
+            sid_idx = item[1] - 2
+            sid = added_state_ids[sid_idx]
+            self._print("[Goal stage] resolved ObjList answer to added state id")
+            self._print(f"[Goal vars] sid_idx={sid_idx}, sid={sid}, added_state_ids_len={len(added_state_ids)}")
+            tactic = span_map.get_snippet_by_sid(sid, self._TACTIC_NOT_FOUND)
+            self._print(f"Associated tactic for sid {sid}: <{tactic}>")
+
+            if len(obj_list) == 0:
+                coq_goal_strings.append("There are no more subgoals")
+            else:
+                obj = obj_list[0]
+                self._print("[Goal stage] processing ObjList entry")
+                self._print(f"[Goal vars] obj={obj}")
+
+                assert len(obj_list) == 1, (
+                    "Expected exactly one object in PpStr ObjList, "
+                    f"but got {len(obj_list)} objects for sid={sid}, tactic=<{tactic}>, obj_list={obj_list}"
+                )
+                assert isinstance(obj, list) and len(obj) == 2, (
+                    "Expected PpStr ObjList entry to be a two-element list, "
+                    f"but got obj={obj} for sid={sid}, tactic=<{tactic}>"
+                )
+
+                obj_head, goal_string = obj
+                assert hasattr(obj_head, "value") and obj_head.value() == "CoqString" and isinstance(goal_string, str), (
+                    "Expected PpStr ObjList entry to have shape [CoqString, str], "
+                    f"but got obj={obj} for sid={sid}, tactic=<{tactic}>"
+                )
+
+                coq_goal_strings.append(goal_string)
+                self._print("[Goal stage] appended CoqString")
+                self._print(
+                    f"[Goal vars] goal_string={goal_string!r}, "
+                    f"coq_goal_strings_len={len(coq_goal_strings)}"
+                )
+
+        return coq_goal_strings
+
+    def get_coq_asts(
+        self,
+        file_path: str | Path,
+        project_path: str | Path,
+        coq_script_thm: str,
+        added_state_ids: list[int],
+        span_map: AddedSpanMap,
+    ) -> list[tuple[int, AstMetric]]:
+        self._print("(get_coq_asts) get_coq_asts is called")
+        coq_script = coq_script_thm + f"(Exec {added_state_ids[-1]})"
+        for sid in added_state_ids:
+            coq_script += f"(Query ((sid {sid}) (pp ((pp_format PpSer)))) Goals)"
+
+        stdout = self.run_sertop_with_script(
+            file_path=file_path,
+            project_path=project_path,
+            script=coq_script,
+        )
+
+        coqasts: list[tuple[int, Ast]] = []
+        for idx, item in enumerate(self.parse_sertop_output(stdout, erase_feedback_sertop_output=True)):
+            self._print("-" * 80)
+            self._print("(get_coq_asts) item: ", item)
             if not (isinstance(item, list) and len(item) >= 3):
                 continue
             answer_content = item[2]
@@ -590,7 +627,7 @@ class Parser:
                     self._print("[AST stage] extracted goals")
                     self._print(f"[AST vars] goals_len={len(goals)}, goals={goals}")
                     goals_ty = []
-                    
+
                     for goal_idx, goal in enumerate(goals):
                         self._print("[AST stage] processing goal")
                         self._print(f"[AST vars] goal_idx={goal_idx}, goal={goal}")
@@ -600,18 +637,18 @@ class Parser:
                         self._print(f"[AST vars] goals_ty_len={len(goals_ty)}")
                         assert ty[0].value() == "ty"
 
-                    goals_ty = sexpdata_to_plain(goals_ty)
+                    plain_goals_ty = sexpdata_to_plain(goals_ty)
 
-                    coqasts.append((sid, goals_ty))
+                    coqasts.append((sid, plain_goals_ty))
                     self._print("[AST stage] appended parsed goals_ty")
-                    self._print(f"[AST vars] appended sid={sid}, goals_ty={goals_ty}, coqasts_len={len(coqasts)}")
+                    self._print(f"[AST vars] appended sid={sid}, goals_ty={plain_goals_ty}, coqasts_len={len(coqasts)}")
                 else:
                     self._print("[AST stage] unrecognized object shape")
                     self._print(f"[AST vars] sid={sid}, obj_type={type(obj)}, obj={obj}")
 
         assert len(coqasts) == len(added_state_ids), f"Expected coqasts length to match added_state_ids length, but got {len(coqasts)} coqasts and {len(added_state_ids)} state IDs."
 
-        def collect_ast_metrics(ast):
+        def collect_ast_metrics(ast: Ast | str) -> AstMetric:
             if isinstance(ast, list):
                 children = [collect_ast_metrics(item) for item in ast]
                 processed_children = [c[0] for c in children]
@@ -620,19 +657,99 @@ class Parser:
                 return (processed_children, total_count, max_depth + 1)
             return (ast, 1, 1)
 
-        coqasts_light = [(sid, collect_ast_metrics(ast)) for sid, ast in coqasts]
+        return [(sid, collect_ast_metrics(ast)) for sid, ast in coqasts]
+
+    def run_sertop_commands(self, file_path: str | Path, project_path: str | Path) -> list[ProofWithAst]:
+        self.current_parse_target = self.extract_parse_target(file_path, project_path)
+        self._print(f"[Parser] Current parse target: {self.current_parse_target.format_for_display()}")
+
+        self._print("======> stage a: Reading and Preprocessing Coq Code =====")
+
+        coq_code = self.get_coq_code(file_path, normalize_space=False)
+
+        self._print("======> stage a: Coq Code to be Added =====")
+
+        dumped = sexpdata.dumps(coq_code)
+
+        self._print("======> stage a: Dumped Coq Code =====")
+
+        coq_script_thm = f"(Add () {dumped})\n"
+        
+        self._print("======> stage a: Running SERTOP with Add Command =====")
+
+        stdout = self.run_sertop_with_script(file_path=file_path, project_path=project_path, script=coq_script_thm)
+
+        self._print("======> stage b: SERTOP RAW OUTPUT (after Add) =====")
+
+        parsed_str = "(" + stdout + ")"
+
+        self._print("parsed_str: ", parsed_str)
+
+        parsed = sexpdata.loads(parsed_str)
+
+        self._print("======> stage c: Extracting Added State IDs and Spans =====")
+
+        span_map = AddedSpanMap.get_span(
+            parsed,
+            coq_code,
+            self.print_flag,
+        )
+        added_state_ids = span_map.state_ids
+
+        self._print("\n===== Added Span Mapping (sid -> source span) =====")
+        for row in span_map.spans:
+            self._print(
+                f"sid={row.sid} | start={row.start.line}:{row.start.col} "
+                f"| end={row.end.line}:{row.end.col} "
+                f"| text='{row.snippet}'"
+            )
+
+        self._print(f"\n===== All Added State IDs: {added_state_ids} =====")
+
+        if not added_state_ids:
+            self._print("Warning: No added state IDs found. Returning empty proofs list.")
+            return []
+
+        coqast_metrics = self.get_coq_asts(
+            file_path=file_path,
+            project_path=project_path,
+            coq_script_thm=coq_script_thm,
+            added_state_ids=added_state_ids,
+            span_map=span_map,
+        )
+
+        coq_goal_strings = self.get_coq_goals(
+            file_path=file_path,
+            project_path=project_path,
+            coq_script_thm=coq_script_thm,
+            added_state_ids=added_state_ids,
+            span_map=span_map,
+        )
+        self._print("before processing coq_goal_strings, len: ", len(coq_goal_strings))
+
         coqasts_proofs = []
         inner_proof = False
 
-        self._print("before processing coqasts_light, len: ", len(coqasts_light))
+        self._print("before processing coqast_metrics, len: ", len(coqast_metrics))
 
-        for node in coqasts_light:
+        assert len(coq_goal_strings) == len(coqast_metrics), (
+            "Expected PpStr goal strings and PpSer AST metrics to align one-to-one, "
+            f"but got {len(coq_goal_strings)} goal strings and {len(coqast_metrics)} AST metric entries. "
+            "This usually means some queried sids returned an empty ObjList in one printer mode "
+            "(for example Qed./closed-proof states) while the other mode still produced an entry. "
+            f"added_state_ids={added_state_ids}, "
+            f"coq_goal_strings={coq_goal_strings}, "
+            f"coqast_metric_sids={[sid for sid, _ in coqast_metrics]}"
+        )
+
+        for node, goal_string in zip(coqast_metrics, coq_goal_strings):
             self._print("-" * 80)
             self._print("len of coqasts_proofs: ", len(coqasts_proofs))
             if len(coqasts_proofs) > 0:
                 self._print("len of tactic astinfos: ", len(coqasts_proofs[-1][2]))
             sid, (ast, node_count, depth) = node
             self._print("sid while clustering proofs: ", sid)
+            self._print(f"goal string while clustering proofs: <{goal_string}>")
             tactic = span_map.get_snippet_by_sid(sid, self._TACTIC_NOT_FOUND)
             if tactic == self._TACTIC_NOT_FOUND:
                 self._print("[stage] skip: tactic not found")
@@ -673,7 +790,7 @@ class Parser:
                 inner_proof = True
                 thm_span = span_map.get_span_by_sid(sid)
                 assert thm_span is not None, f"Theorem span not found for sid {sid}"
-                astinfo_for_thm = AstInfo(sid, ast, node_count, depth, tactic, thm_span)
+                astinfo_for_thm = AstInfo(sid, ast, node_count, depth, tactic, goal_string, thm_span)
                 coqasts_proofs.append((tactic, astinfo_for_thm, [], thm_span))
                 self._print("===> new proof added with theorem span: ", format_src_span(thm_span))
                 self._print(f"===> tactic : <{tactic}>")
@@ -687,7 +804,7 @@ class Parser:
                 assert isinstance(span.start, SrcPos) and isinstance(span.end, SrcPos), f"Span should contain SrcPos values, but got {span} for sid {sid}"
                 assert type(span.start.line) == int and type(span.start.col) == int, f"Span start should contain integers, but got {span.start} for sid {sid}"
                 assert type(span.end.line) == int and type(span.end.col) == int, f"Span end should contain integers, but got {span.end} for sid {sid}"
-                info = AstInfo(sid, ast, node_count, depth, tactic, span)
+                info = AstInfo(sid, ast, node_count, depth, tactic, goal_string, span)
                 if tactic.startswith('Ltac') or tactic.startswith('Local Ltac'):
                     self._print("[stage] branch: skip-ltac")
                     continue
@@ -746,7 +863,7 @@ def main(file_path, project_path):
     print("(simple) Running SERTOP commands for a single file and printing results")
     print(f"(simple) Parse target: {Parser.extract_parse_target(file_path, project_path).format_for_display()}")
 
-    parser = Parser(print_flag=True)
+    parser = Parser(print_flag=False)
     proofs = parser.run_sertop_commands(file_path, project_path)
     output_path = save_ast_results(proofs, file_path, project_path)
     print(f"(simple) AST results saved to: {output_path}")
@@ -762,6 +879,7 @@ def main(file_path, project_path):
             print(f"theorem/definition: <{proof.thm_stmt.strip()}>")
             print(f"theorem span: {format_src_span(proof.thm_span)}")
             print(f"theorem from span: <{extract_text_by_span(coq_code, proof.thm_span).strip()}>")
+            print(f"theorem goal: <{proof.astinfo_for_thm.goal_string}>")
             print("Theorem AST:")
             pretty_print_ast(proof.astinfo_for_thm.ast, indent=2)
             print(f"Number of steps: {len(proof.steps)}")
@@ -770,10 +888,15 @@ def main(file_path, project_path):
                 print(f"Step {idx} span: {format_src_span(info.span)}")
                 print(f"Step {idx} stored: <{info.tactic.strip()}>")
                 print(f"Step {idx} from span: <{extract_text_by_span(coq_code, info.span).strip()}>")
+                print(f"Step {idx} goal: <{info.goal_string}>")
                 print(f"Step {idx} AST:")
                 pretty_print_ast(info.ast, indent=2)
 
     def print_nearest_astinfos_by_source(proofs, top_k=5, q=2):
+        def format_indented_block(value, indent: str) -> str:
+            text = str(value)
+            return "\n".join(f"{indent}{line}" for line in text.splitlines() or [""])
+
         branch_records = []
         for proof in proofs:
             proof_name = proof_name_from_statement(proof.thm_stmt)
@@ -819,13 +942,17 @@ def main(file_path, project_path):
             print("-" * 80)
             print(f"Source theorem: {source['proof_name']}")
             print(f"Source tactic : <{source_info.tactic.strip()}>")
+            print(f"Source goal   : <{source_info.goal_string}>")
             print(f"Source branches: {source['branches']}")
             neighbors.sort(key=lambda item: (item[0], item[1]))
             for rank, (_normalized_dist, _raw_dist, target) in enumerate(neighbors[:top_k], start=1):
                 target_info = target["info"]
                 print(f"  top{rank}. theorem: {target['proof_name']}")
                 print(f"     tactic  : <{target_info.tactic.strip()}>")
-                print(f"     branches: {target['branches']}")
+                print("     goal    :")
+                print(format_indented_block(target_info.goal_string, "       "))
+                print("     branches:")
+                print(format_indented_block(target["branches"], "       "))
 
     coq_code = Path(file_path).read_text(encoding="utf-8")
     print_proofs(proofs, coq_code)
@@ -835,7 +962,7 @@ if __name__ == "__main__":
     repo_root = Path(__file__).resolve().parent
 
     paths = [
-        (repo_root / "library" / "basic.v", repo_root / "library"),
+        (repo_root / "library" / "simple.v", repo_root / "library"),
     ]
 
     idx = 0
