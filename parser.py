@@ -455,7 +455,8 @@ class Parser:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            env=env
+            env=env,
+            cwd=project_path,
         )
         return self.go(process, script)
 
@@ -490,9 +491,15 @@ class Parser:
         span_map: AddedSpanMap,
     ) -> list[str]:
         self._print("(get_coq_goals) get_coq_goals is called")
-        coq_script = coq_script_thm + f"(Exec {added_state_ids[-1]})"
+        coq_script = coq_script_thm
+        query_answer_ids: dict[int, int] = {}
+        next_answer_id = 1
         for sid in added_state_ids:
+            coq_script += f"(Exec {sid})"
+            next_answer_id += 1
+            query_answer_ids[next_answer_id] = sid
             coq_script += f"(Query ((sid {sid}) (pp ((pp_format PpStr)))) Goals)"
+            next_answer_id += 1
 
         stdout = self.run_sertop_with_script(
             file_path=file_path,
@@ -506,7 +513,19 @@ class Parser:
             self._print("(get_coq_goals) item: ", item)
             if not (isinstance(item, list) and len(item) >= 3):
                 continue
+            answer_id = item[1]
+            if answer_id not in query_answer_ids:
+                continue
             answer_content = item[2]
+            assert not (
+                isinstance(answer_content, list)
+                and len(answer_content) >= 1
+                and hasattr(answer_content[0], "value")
+                and answer_content[0].value() == "CoqExn"
+            ), (
+                "PpStr Goals query failed even after executing to the queried sid. "
+                f"answer_id={answer_id}, sid={query_answer_ids[answer_id]}, answer_content={answer_content}"
+            )
             if not (isinstance(answer_content, list) and len(answer_content) >= 2):
                 continue
             if not hasattr(answer_content[0], "value") or answer_content[0].value() != "ObjList":
@@ -516,13 +535,12 @@ class Parser:
                 continue
 
             self._print("[Goal stage] ObjList item accepted")
-            self._print(f"[Goal vars] item_idx={idx}, item_answer_id={item[1]}, obj_list_len={len(obj_list)}")
+            self._print(f"[Goal vars] item_idx={idx}, item_answer_id={answer_id}, obj_list_len={len(obj_list)}")
             self._print(f"[Goal vars] obj_list={obj_list}")
 
-            sid_idx = item[1] - 2
-            sid = added_state_ids[sid_idx]
+            sid = query_answer_ids[answer_id]
             self._print("[Goal stage] resolved ObjList answer to added state id")
-            self._print(f"[Goal vars] sid_idx={sid_idx}, sid={sid}, added_state_ids_len={len(added_state_ids)}")
+            self._print(f"[Goal vars] sid={sid}, added_state_ids_len={len(added_state_ids)}")
             tactic = span_map.get_snippet_by_sid(sid, self._TACTIC_NOT_FOUND)
             self._print(f"Associated tactic for sid {sid}: <{tactic}>")
 
@@ -863,7 +881,7 @@ def main(file_path, project_path):
     print("(simple) Running SERTOP commands for a single file and printing results")
     print(f"(simple) Parse target: {Parser.extract_parse_target(file_path, project_path).format_for_display()}")
 
-    parser = Parser(print_flag=False)
+    parser = Parser(print_flag=True)
     proofs = parser.run_sertop_commands(file_path, project_path)
     output_path = save_ast_results(proofs, file_path, project_path)
     print(f"(simple) AST results saved to: {output_path}")
