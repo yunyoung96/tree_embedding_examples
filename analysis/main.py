@@ -158,16 +158,18 @@ def get_trees(
         eval_ele = result['evaluated']
         raw_ast = eval_ele[1]
         tactic = eval_ele[4]
+        goal_string = eval_ele[5] if len(eval_ele) > 5 else ''
         
         parsed_ast = dfs(raw_ast)
         if include_names:
-            trees.append((result['proof'], tactic, parsed_ast))
+            trees.append((result['proof'], tactic, goal_string, parsed_ast))
         else:
             trees.append(parsed_ast)
 
         if limit < 20 and limit != -1:
             print(">>> eval_ele", eval_ele)
             print(">>> raw_ast", raw_ast)
+            print(">>> goal_string", goal_string)
             print(">>> parsed", parsed_ast)
             print("-" * 50)
         
@@ -175,8 +177,6 @@ def get_trees(
         labels = collect_labels(parsed_ast)
         all_labels.extend(labels)
     
-    import numpy as np
-
     return trees
 
 def pretty_print_tree(node, indent=0):
@@ -200,16 +200,17 @@ def main(json_path=None):
         use_filtering_dfs=use_filtering_dfs,
         json_path=json_path,
     )
-    for idx, (proof_name, tactic, tree) in enumerate(trees):
+    for idx, (proof_name, tactic, goal_string, tree) in enumerate(trees):
         tree_output = io.StringIO()
         with redirect_stdout(tree_output):
             pretty_print_tree(tree)
         logger.debug(
-            "\n%s\n[%d] %s | tactic: %s\n%s\n%s",
+            "\n%s\n[%d] %s | tactic: %s\n%s\n%s\n%s",
             "="*60,
             idx,
             proof_name,
             tactic,
+            f"goal:\n{goal_string}" if goal_string else "goal: <empty>",
             "="*60,
             tree_output.getvalue().rstrip(),
         )
@@ -225,5 +226,6 @@ if __name__=="__main__":
     logging.getLogger().setLevel(log_level)
     logger.info(f"Logging level set to: {logging.getLevelName(log_level)}")
     
-    json_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ANALYSIS_DIR, 'ast_basic2.json')
+    #json_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ANALYSIS_DIR, 'ast_library_basic2.v.json')
+    json_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ANALYSIS_DIR, 'ast_library_simple.v.json')
     main(json_path=json_path)

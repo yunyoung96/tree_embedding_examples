@@ -980,7 +980,7 @@ if __name__ == "__main__":
     repo_root = Path(__file__).resolve().parent
 
     paths = [
-        (repo_root / "library" / "simple.v", repo_root / "library"),
+        (repo_root / "library" / "basic2.v", repo_root / "library"),
     ]
 
     idx = 0
