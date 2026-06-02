@@ -1,7 +1,12 @@
 from collections import Counter
 from typing import TypeAlias
 
-from ast_types import Ast
+from apted.helpers import Tree as APTEDTree
+
+try:
+    from data_management.ast_types import Ast
+except ImportError:
+    from ast_types import Ast
 
 Tree: TypeAlias = tuple[str, list["Tree"]]
 Branch: TypeAlias = tuple[str, str, str]
@@ -51,13 +56,45 @@ def compute_branch_distance_from_vectors(
     Returns:
         (normalized_dist, raw_dist)
     """
-    all_branches = set(count1.keys()) | set(count2.keys())
-    dist = sum(abs(count1.get(b, 0) - count2.get(b, 0)) for b in all_branches)
+    dist = branch_distance_from_vectors(count1, count2)
     
     normalization = 4 * (q - 1) + 1
     normalized_dist = dist / normalization if normalization > 0 else dist
     
     return normalized_dist, dist
+
+def to_apted_tree(tree: Tree) -> APTEDTree:
+    label, children = tree
+    return APTEDTree(label, *(to_apted_tree(child) for child in children))
+
+def extract_q_level_binary_branch_vector(tree: Tree, q: int = 2) -> BranchVector:
+    return Counter(extract_q_level_binary_branches(tree, q=q))
+
+def branch_distance_from_vectors(
+    count1: BranchVector,
+    count2: BranchVector,
+) -> int:
+    all_branches = set(count1.keys()) | set(count2.keys())
+    return sum(
+        abs(count1.get(branch, 0) - count2.get(branch, 0))
+        for branch in all_branches
+    )
+
+def branch_distance(
+    branches1: dict[str, int],
+    branches2: dict[str, int],
+) -> int:
+    all_branches = set(branches1.keys()) | set(branches2.keys())
+    return sum(
+        abs(branches1.get(branch, 0) - branches2.get(branch, 0))
+        for branch in all_branches
+    )
+
+def branch_distance_score(
+    branches1: dict[str, int],
+    branches2: dict[str, int],
+) -> float:
+    return 1 / (1 + branch_distance(branches1, branches2))
 
 def dfs_with_filtering(ast: AstNode, var_ids: dict[str, int] | None = None) -> Tree:
     if var_ids is None:
@@ -69,11 +106,17 @@ def dfs_with_filtering(ast: AstNode, var_ids: dict[str, int] | None = None) -> T
         
         ret = ["", []]
         st_idx = 0
+        ed_idx = len(ast)
 
-        def default_elimination(tag: str | int, new_st_idx: int) -> None:
-            nonlocal st_idx
+        def default_elimination(
+            tag: str | int,
+            new_st_idx: int,
+            new_ed_idx: int,
+        ) -> None:
+            nonlocal st_idx, ed_idx
             ret[0] = str(tag)
             st_idx = new_st_idx
+            ed_idx = new_ed_idx
 
         def ind_ref_label(ind_ref: Ast) -> str:
             assert isinstance(ind_ref, list) and len(ind_ref) == 2
@@ -135,6 +178,16 @@ def dfs_with_filtering(ast: AstNode, var_ids: dict[str, int] | None = None) -> T
                     assert ast[2][0] == 'Id'
                     Id = ast[2][1]
                     return (f'KerName_{Id}', [])
+                case 'MutInd':
+                    assert len(ast) >= 2
+                    return (
+                        "MutInd",
+                        [
+                            dfs_with_filtering(child, var_ids)
+                            for child in ast[1:]
+                            if child != []
+                        ],
+                    )
 
             match tag:# cconstr 순서를 지키려고 함
                 case 'Rel':
@@ -162,19 +215,31 @@ def dfs_with_filtering(ast: AstNode, var_ids: dict[str, int] | None = None) -> T
                     return (f'Sort_{sort_type}', [])
                 case 'Cast':
                     assert len(ast) == 4
-                    default_elimination(tag=tag,new_st_idx=1)
+                    default_elimination(tag=tag, new_st_idx=1, new_ed_idx=len(ast))
                 case 'Prod':
                     assert len(ast) == 4
-                    default_elimination(tag=tag,new_st_idx=2)
+                    default_elimination(tag=tag, new_st_idx=2, new_ed_idx=len(ast))
                 case 'Lambda':
                     assert len(ast) == 4
-                    default_elimination(tag=tag,new_st_idx=2)
+                    default_elimination(tag=tag, new_st_idx=2, new_ed_idx=len(ast))
                 case 'LetIn':
                     assert len(ast) == 5
-                    default_elimination(tag=tag,new_st_idx=2)
+                    default_elimination(tag=tag, new_st_idx=2, new_ed_idx=len(ast))
                 case 'App':
                     assert len(ast) == 3
-                    default_elimination(tag=tag,new_st_idx=1)
+                    return (
+                        "App",
+                        [
+                            dfs_with_filtering(ast[1], var_ids),
+                            (
+                                "Parameters",
+                                [
+                                    dfs_with_filtering(param, var_ids)
+                                    for param in ast[2]
+                                ],
+                            ),
+                        ],
+                    )
                 case 'Const':
                     assert len(ast) == 2
                     constant = ast[1][0]
@@ -184,7 +249,34 @@ def dfs_with_filtering(ast: AstNode, var_ids: dict[str, int] | None = None) -> T
                     return ("Const", [dfs_with_filtering(constant[1], var_ids)])
                 case 'Ind':
                     assert len(ast) == 2
-                    default_elimination(tag=tag,new_st_idx=1)
+                    ind_ref, _instance = ast[1]
+                    assert isinstance(ind_ref, list) and len(ind_ref) == 2
+                    mutind, ind_idx = ind_ref
+                    assert isinstance(mutind, list)
+                    assert isinstance(ind_idx, str)
+                    if (
+                        len(mutind) >= 2
+                        and mutind[0] == "MutInd"
+                        and isinstance(mutind[1], list)
+                        and len(mutind[1]) == 3
+                        and mutind[1][0] == "KerName"
+                        and isinstance(mutind[1][2], list)
+                        and len(mutind[1][2]) == 2
+                        and mutind[1][2][0] == "Id"
+                    ):
+                        return (f"Ind_MutInd_{mutind[1][2][1]}_{ind_idx}", [])
+                    return (
+                        "Ind",
+                        [
+                            (
+                                "",
+                                [
+                                    dfs_with_filtering(mutind, var_ids),
+                                    (ind_idx, []),
+                                ],
+                            )
+                        ],
+                    )
                 case 'Construct':
                     assert len(ast) == 2
                     construct_type = ast[1][0][0]
@@ -245,17 +337,15 @@ def dfs_with_filtering(ast: AstNode, var_ids: dict[str, int] | None = None) -> T
                 case 'Float':
                     return ("Float", [])
                 case 'Array':
-                    default_elimination(tag=tag,new_st_idx=2)
+                    default_elimination(tag=tag, new_st_idx=2, new_ed_idx=len(ast))
                     assert len(ast) == 5
                 case _:
-                    default_elimination(tag=tag, new_st_idx=1)
+                    default_elimination(tag=tag, new_st_idx=1, new_ed_idx=len(ast))
 
             if isinstance(tag, int):
                 ret[0] = '_'
 
-        for idx in range(st_idx, len(ast)):
-            #print("ast: ", ast)
-            #print("ast[idx]: ", ast[idx])
+        for idx in range(st_idx, ed_idx):
             assert isinstance(ast[idx], list) or isinstance(ast[idx], str) or isinstance(ast[idx], int)
             ret[1].append(dfs_with_filtering(ast[idx], var_ids))
             
