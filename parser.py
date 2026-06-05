@@ -322,7 +322,6 @@ class AddedSpanMap:
         def normalize_space(s):
             return " ".join(s.replace("\\n", " ").strip().split())
 
-        import re
         span = self._by_sid.get(sid)
         tactic = span.snippet
         self._print(f"[DEBUG get_snippet_by_sid] before normalization: <{tactic}>")
@@ -468,7 +467,6 @@ class Parser:
         self._print(f"Reading Coq code from: {file_path}")
         basic_v_path = Path(file_path)
         if normalize_space:
-            import re
             coq_lines = []
 
             self._print(f"Reading Coq code from: {basic_v_path}")
@@ -856,7 +854,6 @@ class Parser:
                 coqasts_proofs[-1][2].append(info)
                 self._print("===> tactic : ", tactic)
             pattern = r"\s*Proof\s*\."
-            import re
             if tactic in ['Qed.', 'Admitted.','Defined.'] \
                 or (tactic.startswith('Proof ') 
                      and not tactic.startswith('Proof with ')
@@ -904,11 +901,11 @@ class Parser:
 
         return proofs_list
 
-def main(file_path, project_path):
+def main(file_path, project_path, print_analysis: bool = False):
     print("(simple) Running SERTOP commands for a single file and printing results")
     print(f"(simple) Parse target: {Parser.extract_parse_target(file_path, project_path).format_for_display()}")
 
-    parser = Parser(print_flag=False)
+    parser = Parser(print_flag=print_analysis)
     proofs = parser.run_sertop_commands(file_path, project_path)
     output_path = save_ast_results(proofs, file_path, project_path)
     print(f"(simple) AST results saved to: {output_path}")
@@ -999,16 +996,17 @@ def main(file_path, project_path):
                 print("     branches:")
                 print(format_indented_block(target["branches"], "       "))
 
-    coq_code = Path(file_path).read_text(encoding="utf-8")
-    print_proofs(proofs, coq_code)
-    print_nearest_astinfos_by_source(proofs)
+    if print_analysis:
+        coq_code = Path(file_path).read_text(encoding="utf-8")
+        print_proofs(proofs, coq_code)
+        print_nearest_astinfos_by_source(proofs)
 
 
 if __name__ == "__main__":
     repo_root = Path(__file__).resolve().parent
 
     paths = [
-        (repo_root / "library" / "basic2.v", repo_root / "library"),
+        (repo_root / "library" / "simple.v", repo_root / "library"),
     ]
 
     idx = 0
