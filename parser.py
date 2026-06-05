@@ -10,8 +10,12 @@ from datetime import datetime
 from collections import Counter
 from typing import Any, TypeAlias
 
-from ast_types import Ast
-import tree_utils
+try:
+    from data_management.ast_types import Ast
+    from data_management import tree_utils
+except ImportError:
+    from ast_types import Ast
+    import tree_utils
 
 AstMetric: TypeAlias = tuple[Ast | str, int, int]
 
@@ -748,6 +752,47 @@ class Parser:
         coqasts_proofs = []
         inner_proof = False
 
+        theorem_like_prefixes = (
+            "Definition",
+            "Let",
+            "Theorem",
+            "Lemma",
+            "Next Obligation.",
+            "Fixpoint",
+            "Instance",
+            "Goal",
+            "Remark",
+            "Corollary",
+            "Function",
+            "Fact",
+            "Example",
+            "Proposition",
+            "Add Morphism",
+            "Add Parametric Morphism",
+            "Derive",
+        )
+        theorem_like_qualifiers = (
+            "",
+            "Local ",
+            "Global ",
+            "Polymorphic ",
+            "Global Polymorphic ",
+            "Program ",
+            "Local Program ",
+            "Global Program ",
+        )
+
+        def is_theorem_like_start(tactic: str, ast: Ast | str) -> bool:
+            if len(ast) == 0:
+                return False
+            normalized_tactic = " ".join(tactic.split())
+            normalized_tactic = re.sub(r"^(?:#\[[^\]]+\]\s*)+", "", normalized_tactic)
+            return any(
+                normalized_tactic.startswith(f"{qualifier}{prefix}")
+                for qualifier in theorem_like_qualifiers
+                for prefix in theorem_like_prefixes
+            )
+
         self._print("before processing coqast_metrics, len: ", len(coqast_metrics))
 
         assert len(coq_goal_strings) == len(coqast_metrics), (
@@ -785,25 +830,7 @@ class Parser:
                     f"sid={sid}, tactic=<{tactic}>, ast={ast}"
                 )
 
-            if (tactic.startswith('Definition') and len(ast) != 0)\
-                or (tactic.startswith('Let') and len(ast) != 0)\
-                or (tactic.startswith('Theorem') and len(ast) != 0)\
-                or (tactic.startswith('Lemma') and len(ast) != 0)\
-                or (tactic.startswith('Next Obligation.') and len(ast) != 0)\
-                or (tactic.startswith('Fixpoint') and len(ast) != 0)\
-                or (tactic.startswith('Instance') and len(ast) != 0)\
-                or (tactic.startswith('Global Instance') and len(ast) != 0)\
-                or (tactic.startswith('Goal') and len(ast) != 0)\
-                or (tactic.startswith('Remark') and len(ast) != 0)\
-                or (tactic.startswith('Corollary') and len(ast) != 0)\
-                or (tactic.startswith('Function') and len(ast) != 0)\
-                or (tactic.startswith('Fact') and len(ast) != 0)\
-                or (tactic.startswith('Example') and len(ast) != 0)\
-                or (tactic.startswith('Proposition') and len(ast) != 0)\
-                or (tactic.startswith('Add Morphism') and len(ast) != 0)\
-                or (tactic.startswith('Add Parametric Morphism') and len(ast) != 0)\
-                or (tactic.startswith('Derive') and len(ast) != 0)\
-                :
+            if is_theorem_like_start(tactic, ast):
                 self._print("[stage] branch: theorem/definition-start")
                 inner_proof = True
                 thm_span = span_map.get_span_by_sid(sid)
@@ -881,7 +908,7 @@ def main(file_path, project_path):
     print("(simple) Running SERTOP commands for a single file and printing results")
     print(f"(simple) Parse target: {Parser.extract_parse_target(file_path, project_path).format_for_display()}")
 
-    parser = Parser(print_flag=True)
+    parser = Parser(print_flag=False)
     proofs = parser.run_sertop_commands(file_path, project_path)
     output_path = save_ast_results(proofs, file_path, project_path)
     print(f"(simple) AST results saved to: {output_path}")
@@ -975,6 +1002,7 @@ def main(file_path, project_path):
     coq_code = Path(file_path).read_text(encoding="utf-8")
     print_proofs(proofs, coq_code)
     print_nearest_astinfos_by_source(proofs)
+
 
 if __name__ == "__main__":
     repo_root = Path(__file__).resolve().parent
