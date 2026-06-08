@@ -331,10 +331,7 @@ class AddedSpanMap:
                 if isinstance(answer_content, list) and len(answer_content) >= 2:
                     if answer_content[0].value() == "Added":
                         state_id = answer_content[1]
-                        span_map._print(f"[DEBUG get_span input] raw item={item}")
-                        span_map._print(f"[DEBUG get_span input] answer_content={answer_content}")
                         loc = cls.loc_list_to_dict(answer_content[2] if len(answer_content) >= 3 else [])
-                        span_map._print(f"[DEBUG loc] sid={state_id} loc={loc}")
                         bp = int(loc.get("bp", 0))
                         ep = int(loc.get("ep", 0))
                         start_line, start_col = cls.offset_to_line_col(coq_code, bp)
@@ -351,8 +348,10 @@ class AddedSpanMap:
                             end=SrcPos(end_line, end_col),
                             snippet=snippet,
                         )
-                        span_map._print(f"[DEBUG AddedSpan add] {added_span}")
-                        span_map._print("-" * 80)
+                        span_map._print(
+                            "[DEBUG AddedSpan add] "
+                            f"sid={state_id} span={start_line}:{start_col}-{end_line}:{end_col}"
+                        )
                         span_map.add(added_span)
         return span_map
 
@@ -697,8 +696,6 @@ class Parser:
 
         coq_goal_strings: list[str] = []
         for idx, item in enumerate(self.parse_sertop_output(stdout, erase_feedback_sertop_output=True)):
-            self._print("-" * 80)
-            self._print("(get_coq_goals) item: ", item)
             if not (isinstance(item, list) and len(item) >= 3):
                 continue
             answer_id = item[1]
@@ -722,22 +719,17 @@ class Parser:
             if not isinstance(obj_list, list):
                 continue
 
-            self._print("[Goal stage] ObjList item accepted")
-            self._print(f"[Goal vars] item_idx={idx}, item_answer_id={answer_id}, obj_list_len={len(obj_list)}")
-            self._print(f"[Goal vars] obj_list={obj_list}")
-
             sid = query_answer_ids[answer_id]
-            self._print("[Goal stage] resolved ObjList answer to added state id")
-            self._print(f"[Goal vars] sid={sid}, added_state_ids_len={len(added_state_ids)}")
             tactic = span_map.get_snippet_by_sid(sid, self._TACTIC_NOT_FOUND)
-            self._print(f"Associated tactic for sid {sid}: <{tactic}>")
+            self._print(
+                "[Goal stage] ObjList accepted "
+                f"idx={idx} answer_id={answer_id} sid={sid} obj_list_len={len(obj_list)}"
+            )
 
             if len(obj_list) == 0:
                 coq_goal_strings.append("There are no more subgoals")
             else:
                 obj = obj_list[0]
-                self._print("[Goal stage] processing ObjList entry")
-                self._print(f"[Goal vars] obj={obj}")
 
                 assert len(obj_list) == 1, (
                     "Expected exactly one object in PpStr ObjList, "
@@ -755,10 +747,9 @@ class Parser:
                 )
 
                 coq_goal_strings.append(goal_string)
-                self._print("[Goal stage] appended CoqString")
                 self._print(
-                    f"[Goal vars] goal_string={goal_string!r}, "
-                    f"coq_goal_strings_len={len(coq_goal_strings)}"
+                    "[Goal stage] appended CoqString "
+                    f"sid={sid} goal_len={len(goal_string)} total={len(coq_goal_strings)}"
                 )
 
         return coq_goal_strings
@@ -785,8 +776,6 @@ class Parser:
 
         coqasts: list[tuple[int, Ast]] = []
         for idx, item in enumerate(self.parse_sertop_output(stdout, erase_feedback_sertop_output=True)):
-            self._print("-" * 80)
-            self._print("(get_coq_asts) item: ", item)
             if not (isinstance(item, list) and len(item) >= 3):
                 continue
             answer_content = item[2]
@@ -798,83 +787,67 @@ class Parser:
             if not isinstance(obj_list, list):
                 continue
 
-            self._print("[AST stage] ObjList item accepted")
-            self._print(f"[AST vars] item_idx={idx}, item_answer_id={item[1]}, obj_list_len={len(obj_list)}")
-            self._print(f"[AST vars] obj_list={obj_list}")
-
             sid_idx = item[1] - 2
             sid = added_state_ids[sid_idx]
-            self._print("[AST stage] resolved ObjList answer to added state id")
-            self._print(f"[AST vars] sid_idx={sid_idx}, sid={sid}, added_state_ids_len={len(added_state_ids)}")
-            self._print(f"Processing item with sid={sid}")
             tactic = span_map.get_snippet_by_sid(sid, self._TACTIC_NOT_FOUND)
-            self._print(f"Associated tactic for sid {sid}: <{tactic}>")
+            self._print(
+                "[AST stage] ObjList accepted "
+                f"idx={idx} answer_id={item[1]} sid={sid} obj_list_len={len(obj_list)}"
+            )
             if len(obj_list) == 0:
-                self._print("[AST stage] empty ObjList")
-                self._print("No AST returned for this sid, appending empty list")
+                self._print(f"[AST stage] empty ObjList sid={sid}")
                 coqasts.append((sid, []))
-                self._print(f"[AST vars] appended coqasts entry: sid={sid}, ast=[]")
                 continue
 
-            self._print("[AST stage] validating single ObjList entry")
-            self._print(f"[AST vars] len(obj_list)={len(obj_list)}")
-            assert len(obj_list) == 1
+            assert len(obj_list) == 1, (
+                "Expected exactly one object in PpSer ObjList, "
+                f"but got {len(obj_list)} objects for sid={sid}, tactic=<{tactic}>"
+            )
 
-            self._print(f"AST returned for sid {sid}: ", obj_list[0])
-            for obj_idx, obj in enumerate(obj_list):
-                self._print("[AST stage] processing ObjList entry")
-                self._print(f"[AST vars] sid={sid}, obj_idx={obj_idx}, obj={obj}")
-                if isinstance(obj, list) and len(obj) >= 1 and hasattr(obj[0], "value") and \
-                    (obj[0].value() == "CoqAst" or obj[0].value() == "CoqGoal"):
-                    self._print("[AST stage] recognized CoqAst/CoqGoal object")
-                    self._print(f"[AST vars] obj_head={obj[0].value()}, obj_len={len(obj)}")
-                    assert len(obj) == 2
+            obj = obj_list[0]
+            if isinstance(obj, list) and len(obj) >= 1 and hasattr(obj[0], "value") and \
+                (obj[0].value() == "CoqAst" or obj[0].value() == "CoqGoal"):
+                assert len(obj) == 2
 
-                    goals = obj[1][0][1]
-                    self._print("[AST stage] extracted goals")
-                    self._print(f"[AST vars] goals_len={len(goals)}, goals={goals}")
-                    goals_ast = []
+                goals = obj[1][0][1]
+                self._print(f"[AST stage] processing sid={sid} goals_len={len(goals)}")
+                goals_ast = []
 
-                    for goal_idx, goal in enumerate(goals):
-                        self._print("[AST stage] processing goal")
-                        self._print(f"[AST vars] goal_idx={goal_idx}, goal={goal}")
-                        goal_ast_fields = self.extract_goal_ast_fields(
-                            goal,
-                            include_hypothesis_asts=include_hypothesis_asts,
-                        )
-                        ty = goal_ast_fields[0]
-                        self._print(f"[AST vars] goal_idx={goal_idx}, ty={ty}")
-                        assert self.sexp_field_tag(ty) == "ty"
+                for goal_idx, goal in enumerate(goals):
+                    goal_ast_fields = self.extract_goal_ast_fields(
+                        goal,
+                        include_hypothesis_asts=include_hypothesis_asts,
+                    )
+                    ty = goal_ast_fields[0]
+                    assert self.sexp_field_tag(ty) == "ty"
 
-                        if include_hypothesis_asts:
-                            hyp = next(
-                                (field for field in goal if self.sexp_field_tag(field) == "hyp"),
-                                None,
-                            )
-                            if hyp is not None:
-                                assert self.sexp_field_tag(hyp) == "hyp"
-                                hyp_is_empty = self.sexp_field_is_empty_hyp(hyp)
-                                self._print(f"[AST vars] goal_idx={goal_idx}, hyp={hyp}, hyp_is_empty={hyp_is_empty}")
-                        goals_ast.extend(goal_ast_fields)
-                        self._print(f"[AST vars] goals_ast_len={len(goals_ast)}")
+                    goals_ast.extend(goal_ast_fields)
+                    self._print(
+                        "[AST stage] appended goal fields "
+                        f"sid={sid} goal_idx={goal_idx} field_count={len(goal_ast_fields)}"
+                    )
 
-                    plain_goals_ast = sexpdata_to_plain(goals_ast)
+                plain_goals_ast = sexpdata_to_plain(goals_ast)
 
-                    coqasts.append((sid, plain_goals_ast))
-                    self._print("[AST stage] appended parsed goals_ast")
-                    self._print(f"[AST vars] appended sid={sid}, goals_ast={plain_goals_ast}, coqasts_len={len(coqasts)}")
-                else:
-                    self._print("[AST stage] unrecognized object shape")
-                    self._print(f"[AST vars] sid={sid}, obj_type={type(obj)}, obj={obj}")
+                coqasts.append((sid, plain_goals_ast))
+                self._print(
+                    "[AST stage] appended parsed goals_ast "
+                    f"sid={sid} total={len(coqasts)}"
+                )
+            else:
+                self._print(
+                    "[AST stage] unrecognized object shape "
+                    f"sid={sid} obj_type={type(obj).__name__}"
+                )
 
         assert len(coqasts) == len(added_state_ids), f"Expected coqasts length to match added_state_ids length, but got {len(coqasts)} coqasts and {len(added_state_ids)} state IDs."
 
         def collect_ast_metrics(ast: Ast | str) -> AstMetric:
             if isinstance(ast, list):
                 children = [collect_ast_metrics(item) for item in ast]
-                processed_children = [c[0] for c in children]
-                total_count = 1 + sum(c[1] for c in children)
-                max_depth = max([c[2] for c in children]) if children else 0
+                processed_children = [child[0] for child in children]
+                total_count = 1 + sum(child[1] for child in children)
+                max_depth = max([child[2] for child in children]) if children else 0
                 return (processed_children, total_count, max_depth + 1)
             return (ast, 1, 1)
 
@@ -910,11 +883,9 @@ class Parser:
 
         self._print("======> stage b: SERTOP RAW OUTPUT (after Add) =====")
 
-        parsed_str = "(" + stdout + ")"
+        self._print(f"[Parser] Add stdout length: {len(stdout)}")
 
-        self._print("parsed_str: ", parsed_str)
-
-        parsed = sexpdata.loads(parsed_str)
+        parsed = sexpdata.loads("(" + stdout + ")")
 
         self._print("======> stage c: Extracting Added State IDs and Spans =====")
 
@@ -988,7 +959,7 @@ class Parser:
                 self._print("len of tactic astinfos: ", len(coqasts_proofs[-1][2]))
             sid, (ast, node_count, depth) = node
             self._print("sid while clustering proofs: ", sid)
-            self._print(f"goal string while clustering proofs: <{goal_string}>")
+            self._print(f"goal string length while clustering proofs: {len(goal_string)}")
             tactic = span_map.get_snippet_by_sid(sid, self._TACTIC_NOT_FOUND)
             if tactic == self._TACTIC_NOT_FOUND:
                 self._print("[stage] skip: tactic not found")
