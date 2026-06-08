@@ -394,8 +394,9 @@ class Parser:
     # Sentinel value for missing tactics
     _TACTIC_NOT_FOUND = "__NOT_FOUND__"
     
-    def __init__(self, print_flag=False):
+    def __init__(self, print_flag: bool = False, include_hypothesis_asts: bool = False):
         self.print_flag = print_flag
+        self.include_hypothesis_asts = include_hypothesis_asts
         self.current_parse_target: ParseTarget | None = None
 
     @staticmethod
@@ -505,7 +506,7 @@ class Parser:
         )
 
     @classmethod
-    def extract_goal_ast_fields(cls, goal: Any) -> list[Any]:
+    def extract_goal_ast_fields(cls, goal: Any, include_hypothesis_asts: bool = False) -> list[Any]:
         assert isinstance(goal, list), (
             "Expected goal to be a list of fields, "
             f"but got goal={goal}"
@@ -521,12 +522,13 @@ class Parser:
         )
 
         goal_ast_fields = [ty]
-        hyp = next(
-            (field for field in goal if cls.sexp_field_tag(field) == "hyp"),
-            None,
-        )
-        if hyp is not None and not cls.sexp_field_is_empty_hyp(hyp):
-            goal_ast_fields.append(hyp)
+        if include_hypothesis_asts:
+            hyp = next(
+                (field for field in goal if cls.sexp_field_tag(field) == "hyp"),
+                None,
+            )
+            if hyp is not None and not cls.sexp_field_is_empty_hyp(hyp):
+                goal_ast_fields.append(hyp)
 
         return goal_ast_fields
 
@@ -687,8 +689,11 @@ class Parser:
         coq_script_thm: str,
         added_state_ids: list[int],
         span_map: AddedSpanMap,
+        include_hypothesis_asts: bool | None = None,
     ) -> list[tuple[int, AstMetric]]:
         self._print("(get_coq_asts) get_coq_asts is called")
+        if include_hypothesis_asts is None:
+            include_hypothesis_asts = self.include_hypothesis_asts
         coq_script = coq_script_thm + f"(Exec {added_state_ids[-1]})"
         for sid in added_state_ids:
             coq_script += f"(Query ((sid {sid}) (pp ((pp_format PpSer)))) Goals)"
@@ -754,19 +759,23 @@ class Parser:
                     for goal_idx, goal in enumerate(goals):
                         self._print("[AST stage] processing goal")
                         self._print(f"[AST vars] goal_idx={goal_idx}, goal={goal}")
-                        goal_ast_fields = self.extract_goal_ast_fields(goal)
+                        goal_ast_fields = self.extract_goal_ast_fields(
+                            goal,
+                            include_hypothesis_asts=include_hypothesis_asts,
+                        )
                         ty = goal_ast_fields[0]
                         self._print(f"[AST vars] goal_idx={goal_idx}, ty={ty}")
                         assert self.sexp_field_tag(ty) == "ty"
 
-                        hyp = next(
-                            (field for field in goal if self.sexp_field_tag(field) == "hyp"),
-                            None,
-                        )
-                        if hyp is not None:
-                            assert self.sexp_field_tag(hyp) == "hyp"
-                            hyp_is_empty = self.sexp_field_is_empty_hyp(hyp)
-                            self._print(f"[AST vars] goal_idx={goal_idx}, hyp={hyp}, hyp_is_empty={hyp_is_empty}")
+                        if include_hypothesis_asts:
+                            hyp = next(
+                                (field for field in goal if self.sexp_field_tag(field) == "hyp"),
+                                None,
+                            )
+                            if hyp is not None:
+                                assert self.sexp_field_tag(hyp) == "hyp"
+                                hyp_is_empty = self.sexp_field_is_empty_hyp(hyp)
+                                self._print(f"[AST vars] goal_idx={goal_idx}, hyp={hyp}, hyp_is_empty={hyp_is_empty}")
                         goals_ast.extend(goal_ast_fields)
                         self._print(f"[AST vars] goals_ast_len={len(goals_ast)}")
 
@@ -792,9 +801,17 @@ class Parser:
 
         return [(sid, collect_ast_metrics(ast)) for sid, ast in coqasts]
 
-    def run_sertop_commands(self, file_path: str | Path, project_path: str | Path) -> list[ProofWithAst]:
+    def run_sertop_commands(
+        self,
+        file_path: str | Path,
+        project_path: str | Path,
+        include_hypothesis_asts: bool | None = None,
+    ) -> list[ProofWithAst]:
+        if include_hypothesis_asts is None:
+            include_hypothesis_asts = self.include_hypothesis_asts
         self.current_parse_target = self.extract_parse_target(file_path, project_path)
         self._print(f"[Parser] Current parse target: {self.current_parse_target.format_for_display()}")
+        self._print(f"[Parser] Include hypothesis ASTs: {include_hypothesis_asts}")
 
         self._print("======> stage a: Reading and Preprocessing Coq Code =====")
 
@@ -849,6 +866,7 @@ class Parser:
             coq_script_thm=coq_script_thm,
             added_state_ids=added_state_ids,
             span_map=span_map,
+            include_hypothesis_asts=include_hypothesis_asts,
         )
 
         coq_goal_strings = self.get_coq_goals(
@@ -1014,12 +1032,22 @@ class Parser:
 
         return proofs_list
 
-def main(file_path, project_path, print_analysis: bool = False):
+def main(
+    file_path,
+    project_path,
+    print_analysis: bool = False,
+    include_hypothesis_asts: bool = False,
+):
     print("(simple) Running SERTOP commands for a single file and printing results")
     print(f"(simple) Parse target: {Parser.extract_parse_target(file_path, project_path).format_for_display()}")
+    print(f"(simple) Include hypothesis ASTs: {include_hypothesis_asts}")
 
     parser = Parser(print_flag=True)
-    proofs = parser.run_sertop_commands(file_path, project_path)
+    proofs = parser.run_sertop_commands(
+        file_path,
+        project_path,
+        include_hypothesis_asts=include_hypothesis_asts,
+    )
     output_path = save_ast_results(proofs, file_path, project_path)
     print(f"(simple) AST results saved to: {output_path}")
 
