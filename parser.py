@@ -393,10 +393,38 @@ class AddedSpanMap:
 class Parser:
     # Sentinel value for missing tactics
     _TACTIC_NOT_FOUND = "__NOT_FOUND__"
+    THEOREM_LIKE_PREFIXES = (
+        "Definition",
+        "Let",
+        "Theorem",
+        "Lemma",
+        "Next Obligation.",
+        "Fixpoint",
+        "Instance",
+        "Goal",
+        "Remark",
+        "Corollary",
+        "Function",
+        "Fact",
+        "Example",
+        "Proposition",
+        "Add Morphism",
+        "Add Parametric Morphism",
+        "Derive",
+    )
+    THEOREM_LIKE_QUALIFIERS = (
+        "",
+        "Local ",
+        "Global ",
+        "Polymorphic ",
+        "Global Polymorphic ",
+        "Program ",
+        "Local Program ",
+        "Global Program ",
+    )
     
-    def __init__(self, print_flag: bool = False, include_hypothesis_asts: bool = False):
+    def __init__(self, print_flag: bool = False):
         self.print_flag = print_flag
-        self.include_hypothesis_asts = include_hypothesis_asts
         self.current_parse_target: ParseTarget | None = None
 
     @staticmethod
@@ -442,6 +470,59 @@ class Parser:
         message = f"[Parser] Current parse target: {self.current_parse_target.format_for_display()}"
         print(message)
         return message
+
+    @classmethod
+    def is_theorem_like_tactic(cls, tactic: str, ast: Ast | str | None = None) -> bool:
+        if ast is not None and len(ast) == 0:
+            return False
+        normalized_tactic = " ".join(tactic.split())
+        normalized_tactic = re.sub(r"^(?:#\[[^\]]+\]\s*)+", "", normalized_tactic)
+        return any(
+            normalized_tactic.startswith(f"{qualifier}{prefix}")
+            for qualifier in cls.THEOREM_LIKE_QUALIFIERS
+            for prefix in cls.THEOREM_LIKE_PREFIXES
+        )
+
+    @staticmethod
+    def is_proof_end_tactic(tactic: str) -> bool:
+        proof_start_pattern = r"\s*Proof\s*\."
+        return (
+            tactic in ["Qed.", "Admitted.", "Defined."]
+            or (
+                tactic.startswith("Proof ")
+                and not tactic.startswith("Proof with ")
+                and not tactic.startswith("Proof using")
+                and not re.fullmatch(proof_start_pattern, tactic)
+            )
+        )
+
+    def select_last_theorem_state_ids(
+        self,
+        added_state_ids: list[int],
+        span_map: AddedSpanMap,
+    ) -> list[int]:
+        last_completed: list[int] = []
+        current: list[int] = []
+
+        for sid in added_state_ids:
+            tactic = span_map.get_snippet_by_sid(sid, self._TACTIC_NOT_FOUND)
+            if tactic == self._TACTIC_NOT_FOUND:
+                continue
+
+            if self.is_theorem_like_tactic(tactic):
+                current = [sid]
+                if self.is_proof_end_tactic(tactic):
+                    last_completed = current
+                    current = []
+                continue
+
+            if current:
+                current.append(sid)
+                if self.is_proof_end_tactic(tactic):
+                    last_completed = current
+                    current = []
+
+        return current or last_completed or added_state_ids
     
     @staticmethod
     def remove_coq_block_comments(text):
@@ -689,11 +770,9 @@ class Parser:
         coq_script_thm: str,
         added_state_ids: list[int],
         span_map: AddedSpanMap,
-        include_hypothesis_asts: bool | None = None,
+        include_hypothesis_asts: bool = False,
     ) -> list[tuple[int, AstMetric]]:
         self._print("(get_coq_asts) get_coq_asts is called")
-        if include_hypothesis_asts is None:
-            include_hypothesis_asts = self.include_hypothesis_asts
         coq_script = coq_script_thm + f"(Exec {added_state_ids[-1]})"
         for sid in added_state_ids:
             coq_script += f"(Query ((sid {sid}) (pp ((pp_format PpSer)))) Goals)"
@@ -805,13 +884,13 @@ class Parser:
         self,
         file_path: str | Path,
         project_path: str | Path,
-        include_hypothesis_asts: bool | None = None,
+        include_hypothesis_asts: bool = False,
+        last_theorem_only: bool = True,
     ) -> list[ProofWithAst]:
-        if include_hypothesis_asts is None:
-            include_hypothesis_asts = self.include_hypothesis_asts
         self.current_parse_target = self.extract_parse_target(file_path, project_path)
         self._print(f"[Parser] Current parse target: {self.current_parse_target.format_for_display()}")
         self._print(f"[Parser] Include hypothesis ASTs: {include_hypothesis_asts}")
+        self._print(f"[Parser] Last theorem only: {last_theorem_only}")
 
         self._print("======> stage a: Reading and Preprocessing Coq Code =====")
 
@@ -860,11 +939,20 @@ class Parser:
             self._print("Warning: No added state IDs found. Returning empty proofs list.")
             return []
 
+        query_state_ids = added_state_ids
+        if last_theorem_only:
+            query_state_ids = self.select_last_theorem_state_ids(added_state_ids, span_map)
+            self._print(
+                "[Parser] Last theorem state selection: "
+                f"{len(query_state_ids)} of {len(added_state_ids)} state ids"
+            )
+            self._print(f"[Parser] Query State IDs: {query_state_ids}")
+
         coqast_metrics = self.get_coq_asts(
             file_path=file_path,
             project_path=project_path,
             coq_script_thm=coq_script_thm,
-            added_state_ids=added_state_ids,
+            added_state_ids=query_state_ids,
             span_map=span_map,
             include_hypothesis_asts=include_hypothesis_asts,
         )
@@ -873,54 +961,13 @@ class Parser:
             file_path=file_path,
             project_path=project_path,
             coq_script_thm=coq_script_thm,
-            added_state_ids=added_state_ids,
+            added_state_ids=query_state_ids,
             span_map=span_map,
         )
         self._print("before processing coq_goal_strings, len: ", len(coq_goal_strings))
 
         coqasts_proofs = []
         inner_proof = False
-
-        theorem_like_prefixes = (
-            "Definition",
-            "Let",
-            "Theorem",
-            "Lemma",
-            "Next Obligation.",
-            "Fixpoint",
-            "Instance",
-            "Goal",
-            "Remark",
-            "Corollary",
-            "Function",
-            "Fact",
-            "Example",
-            "Proposition",
-            "Add Morphism",
-            "Add Parametric Morphism",
-            "Derive",
-        )
-        theorem_like_qualifiers = (
-            "",
-            "Local ",
-            "Global ",
-            "Polymorphic ",
-            "Global Polymorphic ",
-            "Program ",
-            "Local Program ",
-            "Global Program ",
-        )
-
-        def is_theorem_like_start(tactic: str, ast: Ast | str) -> bool:
-            if len(ast) == 0:
-                return False
-            normalized_tactic = " ".join(tactic.split())
-            normalized_tactic = re.sub(r"^(?:#\[[^\]]+\]\s*)+", "", normalized_tactic)
-            return any(
-                normalized_tactic.startswith(f"{qualifier}{prefix}")
-                for qualifier in theorem_like_qualifiers
-                for prefix in theorem_like_prefixes
-            )
 
         self._print("before processing coqast_metrics, len: ", len(coqast_metrics))
 
@@ -929,7 +976,7 @@ class Parser:
             f"but got {len(coq_goal_strings)} goal strings and {len(coqast_metrics)} AST metric entries. "
             "This usually means some queried sids returned an empty ObjList in one printer mode "
             "(for example Qed./closed-proof states) while the other mode still produced an entry. "
-            f"added_state_ids={added_state_ids}, "
+            f"query_state_ids={query_state_ids}, "
             f"coq_goal_strings={coq_goal_strings}, "
             f"coqast_metric_sids={[sid for sid, _ in coqast_metrics]}"
         )
@@ -959,7 +1006,7 @@ class Parser:
                     f"sid={sid}, tactic=<{tactic}>, ast={ast}"
                 )
 
-            if is_theorem_like_start(tactic, ast):
+            if self.is_theorem_like_tactic(tactic, ast):
                 self._print("[stage] branch: theorem/definition-start")
                 inner_proof = True
                 thm_span = span_map.get_span_by_sid(sid)
@@ -984,13 +1031,7 @@ class Parser:
                     continue
                 coqasts_proofs[-1][2].append(info)
                 self._print("===> tactic : ", tactic)
-            pattern = r"\s*Proof\s*\."
-            if tactic in ['Qed.', 'Admitted.','Defined.'] \
-                or (tactic.startswith('Proof ') 
-                     and not tactic.startswith('Proof with ')
-                     and not tactic.startswith('Proof using')
-                     and not re.fullmatch(pattern, tactic)
-                     ):
+            if self.is_proof_end_tactic(tactic):
                 self._print("[stage] branch: proof-end")
                 inner_proof = False
             self._print()
@@ -1037,16 +1078,19 @@ def main(
     project_path,
     print_analysis: bool = False,
     include_hypothesis_asts: bool = False,
+    last_theorem_only: bool = True,
 ):
     print("(simple) Running SERTOP commands for a single file and printing results")
     print(f"(simple) Parse target: {Parser.extract_parse_target(file_path, project_path).format_for_display()}")
     print(f"(simple) Include hypothesis ASTs: {include_hypothesis_asts}")
+    print(f"(simple) Last theorem only: {last_theorem_only}")
 
     parser = Parser(print_flag=True)
     proofs = parser.run_sertop_commands(
         file_path,
         project_path,
         include_hypothesis_asts=include_hypothesis_asts,
+        last_theorem_only=last_theorem_only,
     )
     output_path = save_ast_results(proofs, file_path, project_path)
     print(f"(simple) AST results saved to: {output_path}")
