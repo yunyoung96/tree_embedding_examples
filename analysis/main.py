@@ -179,17 +179,6 @@ def get_trees(
     
     return trees
 
-def pretty_print_tree(node, indent=0):
-    if isinstance(node, tuple) and len(node) == 2:
-        label, children = node
-        print("  " * indent + f"├─ {label}")
-        if isinstance(children, list):
-            for i, child in enumerate(children):
-                is_last = i == len(children) - 1
-                pretty_print_tree(child, indent + 1)
-    else:
-        print("  " * indent + f"└─ {node}")
-
 @log_function_call
 def main(json_path=None):
     limit = 20
@@ -203,7 +192,7 @@ def main(json_path=None):
     for idx, (proof_name, tactic, goal_string, tree) in enumerate(trees):
         tree_output = io.StringIO()
         with redirect_stdout(tree_output):
-            pretty_print_tree(tree)
+            tree_utils.pretty_print_tree(tree)
         logger.debug(
             "\n%s\n[%d] %s | tactic: %s\n%s\n%s\n%s",
             "="*60,

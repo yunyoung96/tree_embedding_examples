@@ -166,6 +166,62 @@ def ast_record_to_string(info: AstInfo) -> str:
         info.goal_string,
     ])
 
+def split_goal_string_blocks(goal_string: str) -> list[tuple[str, str]]:
+    separator = "============================"
+    if separator not in goal_string:
+        return []
+
+    parts = goal_string.split(separator)
+    if len(parts) < 2:
+        return []
+
+    hyps = parts[0].strip("\n")
+    blocks: list[tuple[str, str]] = []
+    for idx, segment in enumerate(parts[1:], start=1):
+        if idx < len(parts) - 1:
+            if "\n\n" not in segment:
+                return []
+            conclusion, next_hyps = segment.rsplit("\n\n", 1)
+        else:
+            conclusion = segment
+            next_hyps = None
+
+        blocks.append((hyps.strip("\n"), conclusion.strip("\n")))
+        if next_hyps is not None:
+            hyps = next_hyps.strip("\n")
+
+    return blocks
+
+def normalize_goal_hyps(hyps: str) -> str:
+    lines = [line.strip() for line in hyps.splitlines() if line.strip()]
+    if len(lines) == 1 and lines[0] == "none":
+        return ""
+    return "\n".join(lines)
+
+def format_goal_string_with_shared_hyps(goal_string: str) -> str:
+    blocks = split_goal_string_blocks(goal_string)
+    if len(blocks) <= 1:
+        return goal_string
+
+    normalized_hyps = [normalize_goal_hyps(hyps) for hyps, _conclusion in blocks]
+    share_hyps = all(hyps == normalized_hyps[0] for hyps in normalized_hyps)
+
+    lines: list[str] = []
+    if share_hyps and normalized_hyps[0]:
+        lines.extend(blocks[0][0].strip("\n").splitlines())
+
+    total_goals = len(blocks)
+    for idx, (hyps, conclusion) in enumerate(blocks, start=1):
+        normalized_goal_hyps = normalized_hyps[idx - 1]
+        if idx > 1:
+            lines.extend(["", f"Goal {idx}", ""])
+        if not share_hyps and normalized_goal_hyps:
+            lines.extend(hyps.strip("\n").splitlines())
+        lines.append(f"({idx} / {total_goals})")
+        lines.extend(conclusion.splitlines() or [""])
+
+    return "\n".join(lines)
+
 def build_ast_results(
     proofs: list[ProofWithAst],
     file_path: str | Path,
@@ -427,6 +483,53 @@ class Parser:
             ret.append(item)
         return ret
 
+    @staticmethod
+    def sexp_field_tag(field: Any) -> str | None:
+        if not (isinstance(field, list) and len(field) >= 1):
+            return None
+        tag = field[0]
+        if hasattr(tag, "value"):
+            return tag.value()
+        if isinstance(tag, str):
+            return tag
+        return None
+
+    @classmethod
+    def sexp_field_is_empty_hyp(cls, field: Any) -> bool:
+        return (
+            cls.sexp_field_tag(field) == "hyp"
+            and isinstance(field, list)
+            and len(field) == 2
+            and isinstance(field[1], list)
+            and len(field[1]) == 0
+        )
+
+    @classmethod
+    def extract_goal_ast_fields(cls, goal: Any) -> list[Any]:
+        assert isinstance(goal, list), (
+            "Expected goal to be a list of fields, "
+            f"but got goal={goal}"
+        )
+
+        ty = next(
+            (field for field in goal if cls.sexp_field_tag(field) == "ty"),
+            None,
+        )
+        assert ty is not None, (
+            "Expected goal to include a ty field, "
+            f"but got goal={goal}"
+        )
+
+        goal_ast_fields = [ty]
+        hyp = next(
+            (field for field in goal if cls.sexp_field_tag(field) == "hyp"),
+            None,
+        )
+        if hyp is not None and not cls.sexp_field_is_empty_hyp(hyp):
+            goal_ast_fields.append(hyp)
+
+        return goal_ast_fields
+
     def run_sertop_with_script(self, file_path: str | Path, project_path: str | Path, script: str) -> str:
         cmd = ["sertop", "--printer=sertop"]
         # Setup environment with opam bin directory
@@ -646,22 +749,32 @@ class Parser:
                     goals = obj[1][0][1]
                     self._print("[AST stage] extracted goals")
                     self._print(f"[AST vars] goals_len={len(goals)}, goals={goals}")
-                    goals_ty = []
+                    goals_ast = []
 
                     for goal_idx, goal in enumerate(goals):
                         self._print("[AST stage] processing goal")
                         self._print(f"[AST vars] goal_idx={goal_idx}, goal={goal}")
-                        ty = goal[1]
+                        goal_ast_fields = self.extract_goal_ast_fields(goal)
+                        ty = goal_ast_fields[0]
                         self._print(f"[AST vars] goal_idx={goal_idx}, ty={ty}")
-                        goals_ty.append(ty)
-                        self._print(f"[AST vars] goals_ty_len={len(goals_ty)}")
-                        assert ty[0].value() == "ty"
+                        assert self.sexp_field_tag(ty) == "ty"
 
-                    plain_goals_ty = sexpdata_to_plain(goals_ty)
+                        hyp = next(
+                            (field for field in goal if self.sexp_field_tag(field) == "hyp"),
+                            None,
+                        )
+                        if hyp is not None:
+                            assert self.sexp_field_tag(hyp) == "hyp"
+                            hyp_is_empty = self.sexp_field_is_empty_hyp(hyp)
+                            self._print(f"[AST vars] goal_idx={goal_idx}, hyp={hyp}, hyp_is_empty={hyp_is_empty}")
+                        goals_ast.extend(goal_ast_fields)
+                        self._print(f"[AST vars] goals_ast_len={len(goals_ast)}")
 
-                    coqasts.append((sid, plain_goals_ty))
-                    self._print("[AST stage] appended parsed goals_ty")
-                    self._print(f"[AST vars] appended sid={sid}, goals_ty={plain_goals_ty}, coqasts_len={len(coqasts)}")
+                    plain_goals_ast = sexpdata_to_plain(goals_ast)
+
+                    coqasts.append((sid, plain_goals_ast))
+                    self._print("[AST stage] appended parsed goals_ast")
+                    self._print(f"[AST vars] appended sid={sid}, goals_ast={plain_goals_ast}, coqasts_len={len(coqasts)}")
                 else:
                     self._print("[AST stage] unrecognized object shape")
                     self._print(f"[AST vars] sid={sid}, obj_type={type(obj)}, obj={obj}")
@@ -905,34 +1018,62 @@ def main(file_path, project_path, print_analysis: bool = False):
     print("(simple) Running SERTOP commands for a single file and printing results")
     print(f"(simple) Parse target: {Parser.extract_parse_target(file_path, project_path).format_for_display()}")
 
-    parser = Parser(print_flag=print_analysis)
+    parser = Parser(print_flag=True)
     proofs = parser.run_sertop_commands(file_path, project_path)
     output_path = save_ast_results(proofs, file_path, project_path)
     print(f"(simple) AST results saved to: {output_path}")
 
     def print_proofs(proofs, coq_code: str):
+        def print_goal(label: str, goal_string: str) -> None:
+            print(f"{label} goal: <")
+            print(format_goal_string_with_shared_hyps(goal_string))
+            print(">")
+
+        def print_ast_with_filtering(
+            label: str,
+            ast: Ast | str,
+            theorem_name: str,
+            tactic: str,
+        ) -> None:
+            print(f"{label} theorem: <{theorem_name}>")
+            print(f"{label} tactic: <{tactic.strip()}>")
+            # print(f"{label} AST (before filtering):")
+            # print(ast)
+            print(f"{label} AST (after dfs_with_filtering):")
+            filtered_tree = tree_utils.dfs_with_filtering(ast)
+            tree_utils.pretty_print_tree(filtered_tree, indent=2)
+
         print(">" * 40 + "pt2")
         print("\n" + "="*80)
         print("===== Proofs Summary =====")
         print("="*80)
 
         for proof in proofs:
+            theorem_name = proof_name_from_statement(proof.thm_stmt)
             print("=" * 80)
             print(f"theorem/definition: <{proof.thm_stmt.strip()}>")
             print(f"theorem span: {format_src_span(proof.thm_span)}")
             print(f"theorem from span: <{extract_text_by_span(coq_code, proof.thm_span).strip()}>")
-            print(f"theorem goal: <{proof.astinfo_for_thm.goal_string}>")
-            print("Theorem AST:")
-            pretty_print_ast(proof.astinfo_for_thm.ast, indent=2)
+            print_goal("theorem", proof.astinfo_for_thm.goal_string)
+            print_ast_with_filtering(
+                "Theorem",
+                proof.astinfo_for_thm.ast,
+                theorem_name,
+                proof.astinfo_for_thm.tactic,
+            )
             print(f"Number of steps: {len(proof.steps)}")
             for idx, info in enumerate(proof.astinfos_for_tactics):
                 print("-" * 80)
                 print(f"Step {idx} span: {format_src_span(info.span)}")
                 print(f"Step {idx} stored: <{info.tactic.strip()}>")
                 print(f"Step {idx} from span: <{extract_text_by_span(coq_code, info.span).strip()}>")
-                print(f"Step {idx} goal: <{info.goal_string}>")
-                print(f"Step {idx} AST:")
-                pretty_print_ast(info.ast, indent=2)
+                print_goal(f"Step {idx}", info.goal_string)
+                print_ast_with_filtering(
+                    f"Step {idx}",
+                    info.ast,
+                    theorem_name,
+                    info.tactic,
+                )
 
     def print_nearest_astinfos_by_source(proofs, top_k=5, q=2):
         def format_indented_block(value, indent: str) -> str:
@@ -996,9 +1137,10 @@ def main(file_path, project_path, print_analysis: bool = False):
                 print("     branches:")
                 print(format_indented_block(target["branches"], "       "))
 
+
+    coq_code = Path(file_path).read_text(encoding="utf-8")
+    print_proofs(proofs, coq_code)
     if print_analysis:
-        coq_code = Path(file_path).read_text(encoding="utf-8")
-        print_proofs(proofs, coq_code)
         print_nearest_astinfos_by_source(proofs)
 
 

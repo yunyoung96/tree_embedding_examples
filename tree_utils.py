@@ -96,6 +96,19 @@ def branch_distance_score(
 ) -> float:
     return 1 / (1 + branch_distance(branches1, branches2))
 
+def pretty_print_tree(node, indent=0):
+    def display_label(value) -> str:
+        return "<empty>" if value == "" else str(value)
+
+    if isinstance(node, tuple) and len(node) == 2:
+        label, children = node
+        print("  " * indent + f"├─ {display_label(label)}")
+        if isinstance(children, list):
+            for child in children:
+                pretty_print_tree(child, indent + 1)
+    else:
+        print("  " * indent + f"└─ {display_label(node)}")
+
 def dfs_with_filtering(ast: AstNode, var_ids: dict[str, int] | None = None) -> Tree:
     if var_ids is None:
         var_ids = {}

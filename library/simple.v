@@ -31,3 +31,21 @@ Proof.
     simpl.
     reflexivity.
 Qed.
+
+Lemma f4_multi_goal_hyp : forall (n m : nat), n = m -> m = n -> n = n /\ m = m.
+Proof.
+    intros n m Hnm Hmn.
+    split.
+    - reflexivity.
+    - reflexivity.
+Qed.
+
+Lemma f5_induction : forall n : nat, n + 0 = n.
+Proof.
+    intros n.
+    induction n as [| n IHn].
+    - reflexivity.
+    - simpl.
+      rewrite IHn.
+      reflexivity.
+Qed.
